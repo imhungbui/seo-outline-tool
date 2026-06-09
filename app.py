@@ -135,7 +135,7 @@ BOILERPLATE_PATTERNS = re.compile(
     r"table of contents?|mục lục|contents?|navigation|"
     r"advertisement|sponsored|quảng cáo|"
     r"comments?|bình luận|phản hồi|"
-    r"search|tìm kiếm|menu|home|trang chủ)$",
+    r"search|tìm kiếm|menu|home|trang chủ|bài viết cùng chuyên mục|xem thêm|đọc thêm|chủ đề liên quan)$",
     re.IGNORECASE,
 )
 
@@ -398,6 +398,11 @@ def extract_headings_from_html(html: str) -> tuple[list[dict], int]:
         if not text or not (3 <= len(text) <= 250):
             continue
         if BOILERPLATE_PATTERNS.match(text):
+            continue
+        # Lọc heading chứa tên miền trong ngoặc như "(vinuni.edu.vn)"
+        if re.search(r'\([a-z0-9.-]+\.[a-z]{2,}\)', text, re.IGNORECASE):
+            text = re.sub(r'\s*\([a-z0-9.-]+\.[a-z]{2,}\)', '', text).strip()
+        if not text:
             continue
         headings.append({"tag": tag.name.lower(), "text": text})
     content_el = (
@@ -719,28 +724,31 @@ def build_raw_headings_block(crawl_results: list[dict]) -> str:
 CLUSTER_SYSTEM = """Ban la chuyen gia phan tich noi dung SEO.
 Nhiem vu: phan tich heading H2/H3 tu cac trang doi thu, tong hop thanh danh sach topic UNIQUE.
 
-QUY TAC GOP:
-1. Gop heading CUNG Y NGHIA du dien dat khac nhau -> 1 topic duy nhat
-   - "SEO la gi?" + "Khai niem SEO" + "SEO Website la gi?" -> 1 topic: "SEO la gi?"
-   - "Loi ich SEO" + "Vai tro SEO trong Marketing" -> 1 topic
-   - "Xu huong SEO" xuat hien o nhieu H2 khac nhau -> gop vao 1 H2 duy nhat
-2. MOI Y CHI XUAT HIEN 1 LAN trong toan bo danh sach - khong lap o nhieu H2
-3. CAP BAC: H2 = y bao quat lon, H3 = y chi tiet NAM TRONG H2 do
-   - H3 phai thuc su la sub-topic cua H2, khong phai y ngang hang
-   - Neu 2 heading cung cap do -> cung la H2, khong phai H2-H3
-4. H3 phai UNIQUE trong cung 1 H2: "SEO la gi?" va "Khai niem SEO" trong cung H2 -> gop thanh 1
-5. Loai bo: menu, nav, CTA, quang cao, footer, sidebar
+BUOC 1 - LOC BOILERPLATE (loai bo truoc):
+- Xoa tat ca heading chua ten mien, URL, ten trang web (vi du: "(vinuni.edu.vn)", "[site.com]")
+- Xoa: menu, nav, footer, sidebar, CTA, quang cao, "bai viet cung chuyen muc", "xem them"
+- Xoa: heading chi la ten trang web hoac thuong hieu
 
-LUU Y:
-- H3 chi giu neu thuc su la chi tiet cua H2, khong phai y moi doc lap
-- Khong gioi han so luong H2 hay H3 - lay het cac topic unique
+BUOC 2 - GOP Y NGHIA:
+1. Gop heading CUNG Y NGHIA du dien dat khac nhau -> 1 topic duy nhat
+   Vi du: "Cac loai hinh SEO" + "Phan loai SEO" + "Cac truong phai SEO" -> 1 topic
+   Vi du: "Loi ich SEO" + "Vai tro SEO" + "SEO trong Marketing" -> 1 topic
+   Vi du: "Xu huong SEO" xuat hien nhieu noi -> gop vao 1 H2 duy nhat
+2. MOI CHU DE chi xuat hien 1 lan - neu thay 2 H2 overlap > 50% noi dung -> gop lai
+3. Sau khi gop, tu hoi: "Con H2 nao trung nhau khong?" -> neu co thi gop tiep
+
+BUOC 3 - PHAN CAP:
+- H2 = chu de lon, bao quat
+- H3 = chi tiet cu the cua chu de H2 do (KHONG phai y ngang hang)
+- H3 phai UNIQUE trong cung 1 H2 (gop neu trung)
+- Loai H3 neu la boilerplate hoac khong lien quan den H2
 
 Tra ve JSON thuan tuy:
 {
   "topics": [
     {
-      "h2": "Ten topic H2 (phien ban ro rang nhat, tieng Viet)",
-      "h3s": ["Sub-topic thuc su chi tiet cua H2 nay, tieng Viet"],
+      "h2": "Ten topic H2 ro rang, tieng Viet co dau",
+      "h3s": ["Sub-topic chi tiet cua H2 nay, tieng Viet co dau"],
       "freq": so trang de cap topic nay
     }
   ]
@@ -761,8 +769,14 @@ TIÊU ĐỀ TOP {len(serp_results)} KẾT QUẢ GOOGLE:
 HEADING CỦA {total} TRANG ĐỐI THỦ:
 {raw_block}
 
-Hãy tổng hợp thành danh sách topic unique, phân cấp H2/H3.
-Trả về JSON thuần túy, không markdown fence."""
+Thuc hien theo 3 buoc trong system prompt:
+1. Loc boilerplate
+2. Gop tat ca heading cung y nghia (kiem tra ky - 2 lan)
+3. Phan cap H2/H3
+
+Luu y: "Cac loai hinh SEO" va "Phan loai SEO" la CUNG Y - chi giu 1.
+Kiem tra lai output: co H2 nao overlap voi nhau khong? Neu co thi gop them.
+Tra ve JSON thuan tuy, khong markdown fence."""
 
 # ── Call 2: Gen outline từ topic clusters ─────────────────────────
 OUTLINE_SYSTEM = """Ban la chuyen gia SEO content strategist.
@@ -776,7 +790,7 @@ QUY TAC:
    - CHI giu H3 neu la chi tiet thuc su cua H2 (khong phai y ngang hang)
    - Phai co >= 2 H3 moi dung h3s[], chi co 1 -> de vao bullets
 5. Khong gioi han so H2 - lay het topics tu clusters
-6. faq: de [] neu khong can, hoac them cac FAQ thuc su huu ich
+6. faq: toi da 5 cau, chi cac cau HOI THUC SU khac nhau ve noi dung. Bo cac cau trung y voi nhau.
 7. note: Dien SO THAT vao, vi du "[4/5 đối thủ]" hoac "[2/5 đối thủ]". KHONG de "[X/N]".
 8. Toan bo text tieng Viet
 
