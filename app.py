@@ -626,8 +626,6 @@ def fix_outline_data(data: dict) -> dict:
             if item.get("source") not in VALID_SOURCES: item["source"]="ai"
             if not isinstance(item.get("h3s"),list):     item["h3s"]=[]
             if not isinstance(item.get("bullets"),list): item["bullets"]=[]
-            # Cap H3 toi da 5
-            item["h3s"] = item["h3s"][:5]
             # H3 chi giu neu co >= 2
             if len(item["h3s"]) == 1:
                 item["bullets"] = item["h3s"] + item["bullets"]
@@ -733,10 +731,9 @@ QUY TAC GOP:
 4. H3 phai UNIQUE trong cung 1 H2: "SEO la gi?" va "Khai niem SEO" trong cung H2 -> gop thanh 1
 5. Loai bo: menu, nav, CTA, quang cao, footer, sidebar
 
-GIOI HAN CUNG:
-- Toi da 10 topic H2
-- Moi H2 toi da 5 H3 - neu co nhieu hon thi gop tiep
+LUU Y:
 - H3 chi giu neu thuc su la chi tiet cua H2, khong phai y moi doc lap
+- Khong gioi han so luong H2 hay H3 - lay het cac topic unique
 
 Tra ve JSON thuan tuy:
 {
@@ -778,10 +775,9 @@ QUY TAC:
 4. H3:
    - CHI giu H3 neu la chi tiet thuc su cua H2 (khong phai y ngang hang)
    - Phai co >= 2 H3 moi dung h3s[], chi co 1 -> de vao bullets
-   - Toi da 5 H3 moi H2
-5. So H2 DUNG voi target (+-1)
+5. Khong gioi han so H2 - lay het topics tu clusters
 6. faq: de [] neu khong can, hoac them cac FAQ thuc su huu ich
-7. note: Dien SO THAT vao, vi du "[4/5 doi thu]" hoac "[2/5 doi thu]". KHONG de "[X/N]".
+7. note: Dien SO THAT vao, vi du "[4/5 đối thủ]" hoac "[2/5 đối thủ]". KHONG de "[X/N]".
 8. Toan bo text tieng Viet
 
 JSON schema:
@@ -797,7 +793,7 @@ JSON schema:
       "source": "competitor|ai|hybrid",
       "h3s": ["string - chi neu >= 2 sub-topics thuc su"],
       "bullets": ["goi y ngan neu khong du H3"],
-      "note": "[3/5 doi thu] (so that, khong de X/N)"
+      "note": "[3/5 đối thủ]"
     }
   ],
   "faq": ["cau hoi FAQ neu phu hop, de [] neu khong can"]
@@ -818,9 +814,8 @@ def build_outline_prompt(keyword: str, topic_clusters: dict,
 
     h2_line = ""
     if h2_stats:
-        h2_line = (f"Số H2 đối thủ: avg={h2_stats['avg']}, "
-                   f"median={h2_stats['median']}, range={h2_stats['min']}–{h2_stats['max']}\n"
-                   f"→ TARGET H2 = {h2_stats['target']} (±1)\n")
+        h2_line = (f"Thong tin H2 doi thu: avg={h2_stats['avg']}, "
+                   f"median={h2_stats['median']}, range={h2_stats['min']}-{h2_stats['max']}\n")
 
     clusters_str = _json.dumps(topic_clusters, ensure_ascii=False, indent=2)
 
@@ -1355,9 +1350,7 @@ if st.session_state.running and not regen_btn:
             f" · {len(deduped)} heading duy nhất"
         )
         if h2_stats:
-            st.info(f"📊 Số H2 đối thủ: tb={h2_stats['avg']} · "
-                    f"trung vị={h2_stats['median']} · khoảng {h2_stats['min']}–{h2_stats['max']} "
-                    f"→ **mục tiêu: {h2_stats['target']} H2**")
+            st.info(f"📊 Số H2 đối thủ: tb={h2_stats['avg']} · trung vị={h2_stats['median']} · khoảng {h2_stats['min']}-{h2_stats['max']}")
 
         with st.expander("🕷️ Chi tiết crawl", expanded=False):
             tab1,tab2 = st.tabs(["Theo trang","Đã gộp (tần suất)"])
