@@ -272,7 +272,7 @@ def fetch_serp(keyword: str, login: str, password: str,
         "https://api.dataforseo.com/v3/serp/google/organic/live/advanced",
         auth=(login,password),
         json=[{"keyword":keyword,"location_code":location_code,
-               "language_code":language_code,"depth":30}],
+               "language_code":language_code,"depth":20}],
         timeout=30,
     )
     _raise_dfs_error(resp)
@@ -290,7 +290,7 @@ def fetch_serp(keyword: str, login: str, password: str,
                 "title":       item.get("title",""),
                 "description": item.get("description",""),
             })
-            if len(results) >= 10:
+            if len(results) >= 5:
                 break
     except (KeyError,IndexError,TypeError):
         pass
@@ -822,7 +822,7 @@ Instructions:
 6. Nếu không có H3 từ competitor → dùng bullets (3-6 từ/bullet, 3-5 bullets)
 7. faq = [] (bỏ trống hoàn toàn)
 8. Generate EXACTLY {h2_stats.get('target','6-8') if h2_stats else '6-8'} H2 sections (±1)
-9. All text in {'Vietnamese' if lang=='vi' else 'English'}
+9. All text in Vietnamese
 10. note = ghi "[X/{total_crawled} competitors]" cho mỗi H2
 
 Return pure JSON only."""
@@ -923,7 +923,7 @@ def render_outline_view(data: dict, wc_stats: dict):
         with col_m:
             st.markdown(f"""<div class="sec {sc}">
               <div class="sec-head">
-                <span class="badge b-num">H2 {idx+1}</span>{block['h2']}
+                {block['h2']}
                 <span class="badge {bc}">{bt}</span>{nh}
               </div>{body}</div>""", unsafe_allow_html=True)
         with col_c:
@@ -932,7 +932,7 @@ def render_outline_view(data: dict, wc_stats: dict):
             for b in bullets: lines.append(f"  • {b}")
             st.download_button("📋", data="\n".join(lines),
                                file_name=f"h2_{idx+1}.txt",
-                               mime="text/plain", key=f"dl_h2_{idx}", help=f"H2 {idx+1}")
+                               mime="text/plain", key=f"dl_h2_{idx}", help="Download section")
 
 # ═══════════════════════════════════════════════════════════════════
 # Feature #2: EDITABLE OUTLINE
@@ -1027,7 +1027,7 @@ def outline_to_text(keyword: str, data: dict, wc_stats: dict) -> str:
         lines.append(f"Target: ~{wc_stats['target']:,} words (median {wc_stats['median']:,})")
     lines.append("")
     for i,b in enumerate(data.get("outline",[]),1):
-        lines.append(f"H2 {i}: {b['h2']}  [{b.get('source','ai')}]")
+        lines.append(f"{b['h2']}  [{b.get('source','ai')}]")
         for h in b.get("h3s",[]):      lines.append(f"   H3: {h}")
         for pt in b.get("bullets",[]): lines.append(f"   • {pt}")
         lines.append("")
@@ -1088,19 +1088,7 @@ with st.sidebar:
         dfs_password  = st.text_input("DataForSEO Password", type="password")
         anthropic_key = st.text_input("OpenAI API Key", type="password", placeholder="sk-...")
 
-    with st.expander("🌐 SERP / Market"):
-        loc_opts = {
-            "🇻🇳 Việt Nam":(2704,"vi"),"🇺🇸 United States":(2840,"en"),
-            "🇬🇧 United Kingdom":(2826,"en"),"🇦🇺 Australia":(2036,"en"),
-            "🇸🇬 Singapore":(2702,"en"),
-        }
-        loc_choice = st.selectbox("Market", list(loc_opts.keys()))
-        location_code, serp_lang = loc_opts[loc_choice]
-
-    with st.expander("🌏 Language Override"):
-        lang_override = st.selectbox("Keyword language",
-            ["Auto detect","Vietnamese (vi)","English (en)"],
-            help="Auto detect works well.")
+    location_code, serp_lang = 2704, "vi"
 
     with st.expander("🕷️ Crawl"):
         t1 = st.slider("Timeout attempt 1 (s)", 5, 15, 8)
@@ -1146,19 +1134,15 @@ with reg_col:
 
 # Live detect preview
 if keyword and not st.session_state.running:
-    auto_lang   = detect_language(keyword)
-    eff_lang    = (auto_lang if lang_override=="Auto detect"
-                   else "vi" if "Vietnamese" in lang_override else "en")
-    lang_src    = "auto" if lang_override=="Auto detect" else "manual"
+    eff_lang    = "vi"
     intent_hint = detect_intent_from_modifier(keyword)
     il,ibg,icolor = INTENT_LABELS.get(intent_hint["intent"],INTENT_LABELS["mixed"])
-    flag = "🇻🇳" if eff_lang=="vi" else "🇬🇧"
     cc   = {"high":"#16a34a","medium":"#d97706","low":"#94a3b8"}.get(intent_hint["confidence"],"#94a3b8")
     sig  = ", ".join(intent_hint["signals"][:4]) or "—"
     st.markdown(f"""
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;
                 margin:6px 0 14px;font-size:0.82rem;">
-      <span class="badge b-lang">{flag} {eff_lang.upper()} · {lang_src}</span>
+      <span class="badge b-lang">🇻🇳 VI</span>
       <span class="badge" style="background:{ibg};color:{icolor}">{il}</span>
       <span style="color:{cc};font-weight:600">{intent_hint['confidence']} confidence</span>
       <span style="color:#94a3b8">signals: {sig}</span>
@@ -1412,7 +1396,7 @@ if st.session_state.outline and not st.session_state.running:
         if data.get("h1"):
             lines.append(f"H1: {data['h1']}")
         for i, b in enumerate(data.get("outline", []), 1):
-            lines.append(f"H2 {i}: {b['h2']}")
+            lines.append(b['h2'])
         return "\n".join(lines)
 
     def _copy_h1_h2_h3(data: dict) -> str:
@@ -1420,7 +1404,7 @@ if st.session_state.outline and not st.session_state.running:
         if data.get("h1"):
             lines.append(f"H1: {data['h1']}")
         for i, b in enumerate(data.get("outline", []), 1):
-            lines.append(f"H2 {i}: {b['h2']}")
+            lines.append(b['h2'])
             for h in b.get("h3s", []):
                 lines.append(f"   H3: {h}")
             for pt in b.get("bullets", []):
@@ -1436,15 +1420,11 @@ if st.session_state.outline and not st.session_state.running:
                            file_name=f"outline_{kw[:40].replace(' ','_')}.txt",
                            mime="text/plain", use_container_width=True)
     with c2:
-        st.download_button("📋 H1 + H2", data=txt_h1h2,
-                           file_name=f"h1h2_{kw[:30].replace(' ','_')}.txt",
-                           mime="text/plain", use_container_width=True,
-                           help="Copy H1 và tất cả H2")
+        with st.expander("📋 H1 + H2"):
+            st.code(txt_h1h2, language=None)
     with c3:
-        st.download_button("📋 H1 + H2 + H3", data=txt_h1h2h3,
-                           file_name=f"h1h2h3_{kw[:30].replace(' ','_')}.txt",
-                           mime="text/plain", use_container_width=True,
-                           help="Copy H1, H2 và H3 / bullets")
+        with st.expander("📋 H1 + H2 + H3"):
+            st.code(txt_h1h2h3, language=None)
     with c4:
         if st.session_state.edited_outline:
             if st.button("↩️ Reset edits", use_container_width=True):
