@@ -654,35 +654,42 @@ def fix_outline_data(data: dict) -> dict:
 # ═══════════════════════════════════════════════════════════════════
 def call_claude_stream(system: str, user: str, key: str,
                        on_chunk=None, max_tokens: int=4096) -> str:
+    """OpenAI gpt-4.1-nano with SSE streaming."""
     full = ""; buf = b""; last_call = 0.0
     with httpx.Client(timeout=httpx.Timeout(connect=10,read=120,write=30,pool=5)) as client:
-        with client.stream("POST","https://api.anthropic.com/v1/messages",
-            headers={"x-api-key":key,"anthropic-version":"2023-06-01",
-                     "content-type":"application/json"},
-            json={"model":"claude-sonnet-4-20250514","max_tokens":max_tokens,
-                  "stream":True,"system":system,
-                  "messages":[{"role":"user","content":user}]},
+        with client.stream("POST","https://api.openai.com/v1/chat/completions",
+            headers={"Authorization": f"Bearer {key}",
+                     "content-type": "application/json"},
+            json={"model": "gpt-4.1-nano",
+                  "max_tokens": max_tokens,
+                  "stream": True,
+                  "messages": [
+                      {"role": "system", "content": system},
+                      {"role": "user",   "content": user},
+                  ]},
         ) as resp:
-            if resp.status_code==401: raise ValueError("❌ Anthropic: Invalid API key (401).")
-            if resp.status_code==429: raise ValueError("❌ Anthropic: Rate limit (429). Check plan.")
-            if resp.status_code>=500: raise ValueError(f"❌ Anthropic: Server error ({resp.status_code}).")
+            if resp.status_code==401: raise ValueError("❌ OpenAI: Invalid API key (401).")
+            if resp.status_code==429: raise ValueError("❌ OpenAI: Rate limit (429). Check quota.")
+            if resp.status_code==402: raise ValueError("❌ OpenAI: Insufficient credits (402).")
+            if resp.status_code>=500: raise ValueError(f"❌ OpenAI: Server error ({resp.status_code}).")
             resp.raise_for_status()
             for raw_bytes in resp.iter_bytes(chunk_size=512):
                 buf += raw_bytes
                 while b"\n" in buf:
-                    line_bytes,buf = buf.split(b"\n",1)
-                    line = line_bytes.decode("utf-8",errors="replace").strip()
+                    line_bytes, buf = buf.split(b"\n", 1)
+                    line = line_bytes.decode("utf-8", errors="replace").strip()
                     if not line.startswith("data: "): continue
                     payload = line[6:]
-                    if payload=="[DONE]": break
+                    if payload == "[DONE]": break
                     try:
                         evt = json.loads(payload)
-                        if evt.get("type")=="content_block_delta":
-                            full += evt["delta"].get("text","")
-                            now  = time.monotonic()
-                            if on_chunk and (now-last_call)>=0.25:
-                                on_chunk(full); last_call=now
-                    except (json.JSONDecodeError,KeyError):
+                        chunk = evt["choices"][0]["delta"].get("content","")
+                        if chunk:
+                            full += chunk
+                            now = time.monotonic()
+                            if on_chunk and (now - last_call) >= 0.25:
+                                on_chunk(full); last_call = now
+                    except (json.JSONDecodeError, KeyError, IndexError):
                         continue
     if on_chunk and full: on_chunk(full)
     return full
@@ -695,7 +702,6 @@ def parse_json_response(raw: str) -> dict:
 # ═══════════════════════════════════════════════════════════════════
 # PROMPTS  — Feature #3: H2 count constraint
 # ═══════════════════════════════════════════════════════════════════
-CURRENT_YEAR = 2026  # Update annually
 
 SYSTEM_PROMPT = """Bạn là chuyên gia SEO content strategist. Tạo outline bài viết SEO tốt nhất.
 
@@ -716,12 +722,10 @@ QUY TẮC QUAN TRỌNG:
 
 3. FAQ: KHÔNG tạo FAQ. Để faq=[] rỗng.
 
-4. NĂM THÁNG: Nếu keyword có năm cũ hoặc không có năm → dùng năm hiện tại trong H1/headings.
-   Không được dùng năm < {CURRENT_YEAR}.
 
-5. SỐ H2: generate đúng target_h2_count (±1).
+4. SỐ H2: generate đúng target_h2_count (±1).
 
-6. NGÔN NGỮ: output = ngôn ngữ của keyword.
+5. NGÔN NGỮ: output = ngôn ngữ của keyword.
 
 JSON schema (tất cả field bắt buộc):
 {{
@@ -797,7 +801,6 @@ def build_prompt(keyword, lang, mod_intent, serp_intent, serp_results,
 
     return f"""Keyword: "{keyword}"
 Language: {lang}
-Current year: {CURRENT_YEAR} — dùng năm này trong H1 nếu keyword có năm hoặc cần cập nhật
 
 SEARCH INTENT (2-layer):
 - Modifier: {mod_str}
@@ -1083,7 +1086,7 @@ with st.sidebar:
     with st.expander("🔑 API Keys", expanded=True):
         dfs_login     = st.text_input("DataForSEO Login",    placeholder="email@example.com")
         dfs_password  = st.text_input("DataForSEO Password", type="password")
-        anthropic_key = st.text_input("Anthropic API Key",   type="password", placeholder="sk-ant-...")
+        anthropic_key = st.text_input("OpenAI API Key", type="password", placeholder="sk-...")
 
     with st.expander("🌐 SERP / Market"):
         loc_opts = {
@@ -1172,7 +1175,7 @@ if run_btn and not st.session_state.running:
     if not keyword.strip(): errs.append("Please enter a keyword.")
     if not dfs_login:       errs.append("DataForSEO login required.")
     if not dfs_password:    errs.append("DataForSEO password required.")
-    if not anthropic_key:   errs.append("Anthropic API key required.")
+    if not anthropic_key:   errs.append("OpenAI API key required.")
     if errs:
         for e in errs: st.error(e)
         st.stop()
@@ -1324,7 +1327,7 @@ if st.session_state.running and not regen_btn:
         # Step 3: AI
         st.markdown("**🤖 Generating outline...**")
         ss = st.empty()
-        ss.markdown('<div class="stream-box">Connecting to Claude...</div>',
+        ss.markdown('<div class="stream-box">Connecting to OpenAI...</div>',
                     unsafe_allow_html=True)
         prompt = build_prompt(kw, eff_lang, intent_hint,
                               st.session_state.serp_intent or {},
@@ -1340,7 +1343,7 @@ if st.session_state.running and not regen_btn:
 # PIPELINE: Regenerate
 elif regen_btn and not st.session_state.running:
     if not anthropic_key:
-        st.error("Anthropic API key required."); st.stop()
+        st.error("OpenAI API key required."); st.stop()
     st.session_state.running    = True
     st.session_state.edit_mode  = False
     st.session_state.edited_outline = None
