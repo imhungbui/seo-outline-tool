@@ -781,7 +781,7 @@ QUY TAC:
    - Toi da 5 H3 moi H2
 5. So H2 DUNG voi target (+-1)
 6. faq: de [] neu khong can, hoac them cac FAQ thuc su huu ich
-7. note: CHI ghi "[X/N doi thu]". KHONG ghi source=
+7. note: Dien SO THAT vao, vi du "[4/5 doi thu]" hoac "[2/5 doi thu]". KHONG de "[X/N]".
 8. Toan bo text tieng Viet
 
 JSON schema:
@@ -797,7 +797,7 @@ JSON schema:
       "source": "competitor|ai|hybrid",
       "h3s": ["string - chi neu >= 2 sub-topics thuc su"],
       "bullets": ["goi y ngan neu khong du H3"],
-      "note": "[X/N doi thu]"
+      "note": "[3/5 doi thu] (so that, khong de X/N)"
     }
   ],
   "faq": ["cau hoi FAQ neu phu hop, de [] neu khong can"]
@@ -953,7 +953,7 @@ def render_outline_view(data: dict, wc_stats: dict):
         )
         st.markdown(
             '<div class="sec sec-faq" style="margin-top:12px">'
-            '<div class="sec-head"><span class="badge b-faq">FAQ</span> Cau hoi thuong gap</div>'
+            '<div class="sec-head"><span class="badge b-faq">FAQ</span> Câu hỏi thường gặp</div>'
             '<div class="sec-body">' + faq_rows + '</div>'
             '</div>',
             unsafe_allow_html=True)
