@@ -617,8 +617,7 @@ def validate_outline(data: dict) -> list[str]:
     return errors
 
 def fix_outline_data(data: dict) -> dict:
-    # Always clear FAQ
-    data["faq"] = []
+    if not isinstance(data.get("faq"),list):          data["faq"]=[]
     if not isinstance(data.get("unique_angles"),list): data["unique_angles"]=[]
     if data.get("article_type") not in VALID_ARTICLE_TYPES:
         data["article_type"]="informational"
@@ -627,11 +626,13 @@ def fix_outline_data(data: dict) -> dict:
             if item.get("source") not in VALID_SOURCES: item["source"]="ai"
             if not isinstance(item.get("h3s"),list):     item["h3s"]=[]
             if not isinstance(item.get("bullets"),list): item["bullets"]=[]
-            # H3 chỉ giữ nếu có ≥ 2 — nếu chỉ có 1 H3 thì chuyển sang bullets
+            # Cap H3 toi da 5
+            item["h3s"] = item["h3s"][:5]
+            # H3 chi giu neu co >= 2
             if len(item["h3s"]) == 1:
                 item["bullets"] = item["h3s"] + item["bullets"]
                 item["h3s"] = []
-            # Nếu có cả h3s (≥2) lẫn bullets thì bỏ bullets
+            # Co ca h3s lan bullets -> bo bullets
             if item.get("h3s") and item.get("bullets"):
                 item["bullets"] = []
     return data
@@ -717,25 +718,33 @@ def build_raw_headings_block(crawl_results: list[dict]) -> str:
     return "\n".join(lines)
 
 # ── Call 1: Tổng hợp semantic ──────────────────────────────────────
-CLUSTER_SYSTEM = """Bạn là chuyên gia phân tích nội dung SEO.
-Nhiệm vụ: phân tích heading H2/H3 từ các trang đối thủ, tổng hợp thành danh sách topic unique.
+CLUSTER_SYSTEM = """Ban la chuyen gia phan tich noi dung SEO.
+Nhiem vu: phan tich heading H2/H3 tu cac trang doi thu, tong hop thanh danh sach topic UNIQUE.
 
-QUY TẮC:
-1. Gộp các heading CÙng ý nghĩa thành 1 topic (dù diễn đạt khác nhau)
-   Ví dụ: "Affiliate Marketing là gì?", "Affiliate là gì? AM là gì?", "Định nghĩa Affiliate" → 1 topic
-2. Xác định CẤP BẬC: ý bao quát → H2, ý chi tiết nằm trong ý lớn → H3
-3. Giữ text tiếng Việt, dùng phiên bản phổ biến/rõ ràng nhất
-4. Loại bỏ hoàn toàn: menu, nav, CTA, quảng cáo, footer
-5. Tối đa 12 topic H2, mỗi H2 tối đa 6 H3
+QUY TAC GOP:
+1. Gop heading CUNG Y NGHIA du dien dat khac nhau -> 1 topic duy nhat
+   - "SEO la gi?" + "Khai niem SEO" + "SEO Website la gi?" -> 1 topic: "SEO la gi?"
+   - "Loi ich SEO" + "Vai tro SEO trong Marketing" -> 1 topic
+   - "Xu huong SEO" xuat hien o nhieu H2 khac nhau -> gop vao 1 H2 duy nhat
+2. MOI Y CHI XUAT HIEN 1 LAN trong toan bo danh sach - khong lap o nhieu H2
+3. CAP BAC: H2 = y bao quat lon, H3 = y chi tiet NAM TRONG H2 do
+   - H3 phai thuc su la sub-topic cua H2, khong phai y ngang hang
+   - Neu 2 heading cung cap do -> cung la H2, khong phai H2-H3
+4. H3 phai UNIQUE trong cung 1 H2: "SEO la gi?" va "Khai niem SEO" trong cung H2 -> gop thanh 1
+5. Loai bo: menu, nav, CTA, quang cao, footer, sidebar
 
-Trả về JSON thuần túy:
+GIOI HAN CUNG:
+- Toi da 10 topic H2
+- Moi H2 toi da 5 H3 - neu co nhieu hon thi gop tiep
+- H3 chi giu neu thuc su la chi tiet cua H2, khong phai y moi doc lap
+
+Tra ve JSON thuan tuy:
 {
   "topics": [
     {
-      "h2": "Tên topic H2",
-      "h3s": ["Sub-topic 1", "Sub-topic 2"],
-      "freq": số trang đối thủ đề cập topic này (ước tính),
-      "source_examples": ["ví dụ heading gốc 1", "ví dụ 2"]
+      "h2": "Ten topic H2 (phien ban ro rang nhat, tieng Viet)",
+      "h3s": ["Sub-topic thuc su chi tiet cua H2 nay, tieng Viet"],
+      "freq": so trang de cap topic nay
     }
   ]
 }"""
@@ -759,37 +768,39 @@ Hãy tổng hợp thành danh sách topic unique, phân cấp H2/H3.
 Trả về JSON thuần túy, không markdown fence."""
 
 # ── Call 2: Gen outline từ topic clusters ─────────────────────────
-OUTLINE_SYSTEM = """Bạn là chuyên gia SEO content strategist.
-Nhiệm vụ: tạo outline bài viết SEO hoàn chỉnh từ topic clusters đã tổng hợp.
+OUTLINE_SYSTEM = """Ban la chuyen gia SEO content strategist.
+Nhiem vu: tao outline bai viet SEO hoan chinh tu topic clusters da tong hop.
 
-QUY TẮC:
-1. Dùng topic clusters làm xương sống — đây là insight thực từ đối thủ
-2. source="competitor" nếu topic có freq cao (đối thủ đề cập nhiều)
-   source="hybrid" nếu topic có freq thấp nhưng relevant
-   source="ai" nếu là topic mới AI bổ sung (gap đối thủ bỏ sót)
-3. H3: CHỈ giữ nếu có ≥ 2 sub-topics thực sự. Nếu < 2 → dùng bullets gợi ý
-4. Số H2 ĐÚNG với target (±1)
-5. FAQ: KHÔNG tạo. faq=[]
-6. note: CHỈ ghi "[X đối thủ đề cập]". KHÔNG ghi source=
-7. Toàn bộ text tiếng Việt
+QUY TAC:
+1. Dung topic clusters lam xuong song - day la insight thuc tu doi thu
+2. KIEM TRA TRUNG Y truoc khi them H2: neu 2 topics cung y nghia -> chi giu 1
+3. source="competitor" neu freq cao, source="hybrid" neu freq thap, source="ai" neu AI bo sung gap
+4. H3:
+   - CHI giu H3 neu la chi tiet thuc su cua H2 (khong phai y ngang hang)
+   - Phai co >= 2 H3 moi dung h3s[], chi co 1 -> de vao bullets
+   - Toi da 5 H3 moi H2
+5. So H2 DUNG voi target (+-1)
+6. faq: de [] neu khong can, hoac them cac FAQ thuc su huu ich
+7. note: CHI ghi "[X/N doi thu]". KHONG ghi source=
+8. Toan bo text tieng Viet
 
 JSON schema:
 {
   "h1": "string",
-  "meta_description": "string 150-160 ký tự",
+  "meta_description": "string 150-160 ky tu",
   "article_type": "informational|listicle|how-to|comparison|review|commercial|transactional",
-  "search_intent_confirmed": "string 1 câu",
-  "unique_angles": ["gap mà đối thủ chưa cover"],
+  "search_intent_confirmed": "string 1 cau",
+  "unique_angles": ["gap ma doi thu chua cover"],
   "outline": [
     {
       "h2": "string",
       "source": "competitor|ai|hybrid",
-      "h3s": ["string — chỉ nếu có ≥2 sub-topics thực sự"],
-      "bullets": ["gợi ý ngắn nếu không đủ H3"],
-      "note": "[X đối thủ đề cập]"
+      "h3s": ["string - chi neu >= 2 sub-topics thuc su"],
+      "bullets": ["goi y ngan neu khong du H3"],
+      "note": "[X/N doi thu]"
     }
   ],
-  "faq": []
+  "faq": ["cau hoi FAQ neu phu hop, de [] neu khong can"]
 }"""
 
 def build_outline_prompt(keyword: str, topic_clusters: dict,
@@ -933,6 +944,20 @@ def render_outline_view(data: dict, wc_stats: dict):
                                file_name=f"h2_{idx+1}_{_safe_filename(block["h2"], 20)}.txt",
                                mime="text/plain", key=f"dl_h2_{idx}", help="Tải về section này")
 
+    # FAQ - hien thi neu AI gen ra
+    faq = data.get("faq") or []
+    if faq:
+        faq_rows = "".join(
+            '<div class="h3-row"><span class="h3-arrow">Q</span>' + q + '</div>'
+            for q in faq
+        )
+        st.markdown(
+            '<div class="sec sec-faq" style="margin-top:12px">'
+            '<div class="sec-head"><span class="badge b-faq">FAQ</span> Cau hoi thuong gap</div>'
+            '<div class="sec-body">' + faq_rows + '</div>'
+            '</div>',
+            unsafe_allow_html=True)
+
 # ═══════════════════════════════════════════════════════════════════
 # Feature #2: EDITABLE OUTLINE
 # ═══════════════════════════════════════════════════════════════════
@@ -1032,8 +1057,12 @@ def outline_to_text(keyword: str, data: dict, wc_stats: dict) -> str:
     for b in data.get("outline",[]):
         lines.append(f"H2: {b['h2']}")
         for h in b.get("h3s",[]):      lines.append(f"   H3: {h}")
-        for pt in b.get("bullets",[]): lines.append(f"   • {pt}")
+        for pt in b.get("bullets",[]): lines.append(f"   * {pt}")
         lines.append("")
+    if data.get("faq"):
+        lines.append("FAQ:")
+        for q in data["faq"]:
+            lines.append(f"  Q: {q}")
     return "\n".join(lines)
 
 def _safe_filename(keyword: str, max_len: int = 40) -> str:
