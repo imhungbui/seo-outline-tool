@@ -135,9 +135,14 @@ BOILERPLATE_PATTERNS = re.compile(
     r"table of contents?|mục lục|contents?|navigation|"
     r"advertisement|sponsored|quảng cáo|"
     r"comments?|bình luận|phản hồi|"
-    r"search|tìm kiếm|menu|home|trang chủ|bài viết cùng chuyên mục|xem thêm|đọc thêm|chủ đề liên quan)$",
+    r"search|tìm kiếm|menu|home|trang chủ|bài viết cùng chuyên mục|xem thêm|đọc thêm|chủ đề liên quan|không thể bỏ lỡ|có thể bạn quan tâm|bài viết nổi bật|tin tức mới nhất|tạo cv|topcv|vieclam|timviec|tư vấn du học|học bổng|du học|ngành học|tham khảo thêm|xem ngay|đăng ký ngay|liên hệ ngay)$",
     re.IGNORECASE,
 )
+
+def _clean_heading_text(text: str) -> str:
+    """Strip số thứ tự đầu heading: '1 Title', '2. Title', '1) Title' -> 'Title'"""
+    text = re.sub(r"^\d+[\s\.\)\-]+", "", text).strip()
+    return text
 
 CRAWL_HEADERS = {
     "User-Agent": (
@@ -334,6 +339,9 @@ def _dfs_instant_pages(url: str, login: str, password: str,
                     continue
                 if BOILERPLATE_PATTERNS.match(text):
                     continue
+                text = _clean_heading_text(text)
+                if not text or len(text) < 3:
+                    continue
                 headings.append({"tag": level, "text": text})
         wc = (meta.get("content", {}) or {}).get("plain_text_word_count", 0) or 0
         return {"headings": headings, "word_count": wc,
@@ -402,7 +410,9 @@ def extract_headings_from_html(html: str) -> tuple[list[dict], int]:
         # Lọc heading chứa tên miền trong ngoặc như "(vinuni.edu.vn)"
         if re.search(r'\([a-z0-9.-]+\.[a-z]{2,}\)', text, re.IGNORECASE):
             text = re.sub(r'\s*\([a-z0-9.-]+\.[a-z]{2,}\)', '', text).strip()
-        if not text:
+        # Strip số thứ tự đầu heading
+        text = _clean_heading_text(text)
+        if not text or len(text) < 3:
             continue
         headings.append({"tag": tag.name.lower(), "text": text})
     content_el = (
@@ -436,6 +446,9 @@ def extract_headings_from_markdown(md: str) -> tuple[list[dict], int]:
         if not text or not (3 <= len(text) <= 250):
             continue
         if BOILERPLATE_PATTERNS.match(text):
+            continue
+        text = _clean_heading_text(text)
+        if not text or len(text) < 3:
             continue
         headings.append({"tag": f"h{level}", "text": text})
     body_lines = [l for l in md.splitlines() if not l.startswith("#")]
@@ -709,7 +722,9 @@ QUY TẮC:
    - CHỈ điền h3s nếu đối thủ thực sự có H3 dưới H2 đó
    - Không có H3 từ đối thủ -> dùng bullets (3-5 gợi ý ngắn)
    - H3 phải có >= 2 items, nếu chỉ 1 -> chuyển sang bullets
-3. FAQ: KHÔNG tạo FAQ. faq=[] rỗng.
+   - KHÔNG copy H3 có số thứ tự đầu (ví dụ "1 Title", "2. Title") - bỏ số đi
+3. KIỂM TRA TRÙNG: Nếu H3 của H2 này đã là H2 khác -> không lặp lại ý đó trong H3
+4. FAQ: KHÔNG tạo FAQ. faq=[] rỗng.
 4. note: ghi số thật "[X/N đối thủ]", KHÔNG ghi "[X/N]" hay source=
 5. Toàn bộ text tiếng Việt. Năm hiện tại là 2026.
 
