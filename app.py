@@ -585,7 +585,7 @@ def competitor_h2_stats(crawl_results: list[dict]) -> dict:
 # ═══════════════════════════════════════════════════════════════════
 # HEADING DEDUP + FREQUENCY
 # ═══════════════════════════════════════════════════════════════════
-def _similar(a: str, b: str, threshold: float=0.72) -> bool:
+def _similar(a: str, b: str, threshold: float=0.60) -> bool:
     a,b = a.lower().strip(), b.lower().strip()
     return a==b or SequenceMatcher(None,a,b).ratio()>=threshold
 
@@ -650,6 +650,77 @@ def validate_outline(data: dict) -> list[str]:
                 item["bullets"]=[]
     return errors
 
+def _h2_similar(a: str, b: str) -> bool:
+    """Check 2 H2 có cùng ý nghĩa không (threshold thấp hơn để bắt semantic overlap)."""
+    a2, b2 = a.lower().strip(), b.lower().strip()
+    if a2 == b2:
+        return True
+    # Text similarity
+    if SequenceMatcher(None, a2, b2).ratio() >= 0.55:
+        return True
+    # H3 overlap: nếu 2 H2 share > 50% H3 thì coi là trùng
+    return False
+
+def _merge_duplicate_h2s(outline: list[dict]) -> list[dict]:
+    """
+    Post-process: gộp H2 trùng ý.
+    - Nếu 2 H2 text similar >= 55% -> giữ cái freq cao hơn (note có số lớn hơn)
+    - Nếu 2 H2 share > 50% H3 text -> gộp lại
+    """
+    if len(outline) <= 1:
+        return outline
+
+    def h3_overlap_ratio(a: dict, b: dict) -> float:
+        h3s_a = [h.lower().strip() for h in (a.get("h3s") or [])]
+        h3s_b = [h.lower().strip() for h in (b.get("h3s") or [])]
+        if not h3s_a or not h3s_b:
+            return 0.0
+        # Fuzzy match: count H3 từ a có match >= 0.55 trong b
+        matched = 0
+        for ha in h3s_a:
+            for hb in h3s_b:
+                if SequenceMatcher(None, ha, hb).ratio() >= 0.55:
+                    matched += 1
+                    break
+        return matched / min(len(h3s_a), len(h3s_b))
+
+    merged = []
+    skip_indices = set()
+
+    for i, item in enumerate(outline):
+        if i in skip_indices:
+            continue
+        current = dict(item)
+        for j in range(i + 1, len(outline)):
+            if j in skip_indices:
+                continue
+            other = outline[j]
+            h2_sim  = SequenceMatcher(None,
+                current["h2"].lower(), other["h2"].lower()).ratio()
+            h3_over = h3_overlap_ratio(current, other)
+
+            if h2_sim >= 0.55 or h3_over >= 0.5:
+                # Gộp: giữ H2 có freq cao hơn (parse từ note)
+                def _freq(note: str) -> int:
+                    import re as _re
+                    m = _re.search(r'(\d+)/\d+', note or '')
+                    return int(m.group(1)) if m else 0
+
+                if _freq(other.get("note","")) > _freq(current.get("note","")):
+                    current["h2"] = other["h2"]
+                    current["source"] = other.get("source", current["source"])
+                    current["note"]   = other.get("note",   current.get("note",""))
+
+                # Merge H3s — union, dedup
+                merged_h3s = list(dict.fromkeys(
+                    (current.get("h3s") or []) + (other.get("h3s") or [])
+                ))
+                current["h3s"] = merged_h3s[:6]  # cap at 6
+                skip_indices.add(j)
+
+        merged.append(current)
+    return merged
+
 def fix_outline_data(data: dict) -> dict:
     data["faq"] = []  # luon xoa FAQ
     if not isinstance(data.get("unique_angles"),list): data["unique_angles"]=[]
@@ -667,6 +738,9 @@ def fix_outline_data(data: dict) -> dict:
             # Co ca h3s lan bullets -> bo bullets
             if item.get("h3s") and item.get("bullets"):
                 item["bullets"] = []
+    # Post-process: gộp H2 trùng ý
+    if isinstance(data.get("outline"), list):
+        data["outline"] = _merge_duplicate_h2s(data["outline"])
     return data
 
 # ═══════════════════════════════════════════════════════════════════
