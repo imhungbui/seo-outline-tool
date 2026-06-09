@@ -583,7 +583,7 @@ def dedup_and_weight_headings(crawl_results: list[dict]) -> list[dict]:
 
 def format_headings_for_prompt(deduped: list[dict], total_crawled: int) -> str:
     return "\n".join(
-        f"  [{h['tag'].upper()}] [{h['freq']}/{total_crawled}] {h['text']}"
+        f"  [{h['tag'].upper()}] (đối thủ: {h['freq']}/{total_crawled}) {h['text']}"
         for h in deduped
     )
 
@@ -622,7 +622,7 @@ def validate_outline(data: dict) -> list[str]:
     return errors
 
 def fix_outline_data(data: dict) -> dict:
-    if not isinstance(data.get("faq"),list):          data["faq"]=[]
+    data["faq"] = []  # luon xoa FAQ
     if not isinstance(data.get("unique_angles"),list): data["unique_angles"]=[]
     if data.get("article_type") not in VALID_ARTICLE_TYPES:
         data["article_type"]="informational"
@@ -702,14 +702,14 @@ SYSTEM_PROMPT = """Bạn là chuyên gia SEO content strategist. Tạo outline b
 
 QUY TẮC:
 1. H2 TEXT:
-   - [5+/N]: GIỮ NGUYÊN text từ đối thủ (không rewrite)
-   - [3-4/N]: paraphrase nhẹ, source="competitor"
-   - [1-2/N] hoặc AI: viết mới, source="hybrid"/"ai"
+   - (đối thủ: 5/N hoặc hơn): GIỮ NGUYÊN text từ đối thủ (không rewrite)
+   - (đối thủ: 3-4/N): paraphrase nhẹ, source="competitor"
+   - (đối thủ: 1-2/N) hoặc AI: viết mới, source="hybrid"/"ai"
 2. H3:
    - CHỈ điền h3s nếu đối thủ thực sự có H3 dưới H2 đó
    - Không có H3 từ đối thủ -> dùng bullets (3-5 gợi ý ngắn)
    - H3 phải có >= 2 items, nếu chỉ 1 -> chuyển sang bullets
-3. FAQ: để [] hoặc thêm tối đa 5 câu thực sự hữu ích
+3. FAQ: KHÔNG tạo FAQ. faq=[] rỗng.
 4. note: ghi số thật "[X/N đối thủ]", KHÔNG ghi "[X/N]" hay source=
 5. Toàn bộ text tiếng Việt. Năm hiện tại là 2026.
 
@@ -729,7 +729,7 @@ JSON schema:
       "note": "[X/N đối thủ]"
     }
   ],
-  "faq": ["câu hỏi FAQ nếu phù hợp, để [] nếu không cần"]
+  "faq": []
 }"""
 
 def build_prompt(keyword: str, lang: str, mod_intent: dict,
@@ -799,9 +799,9 @@ HEADING ĐỐI THỦ (đã dedup bằng code, {total_crawled} trang):
 {headings_block}
 {h3_context}
 Hướng dẫn:
-1. [5+/{total_crawled}] H2: COPY NGUYÊN TEXT, source="competitor"
-2. [3-4/{total_crawled}] H2: paraphrase nhẹ, source="competitor"
-3. [1-2/{total_crawled}] H2: rewrite hoặc AI gap
+1. (đối thủ: 5/{total_crawled} hoặc cao hơn): COPY NGUYÊN TEXT, source="competitor"
+2. (đối thủ: 3-4/{total_crawled}): paraphrase nhẹ, source="competitor"
+3. (đối thủ: 1-2/{total_crawled}): rewrite hoặc AI gap
 4. H3: CHỈ điền nếu đối thủ có (xem H3 THỰC TẾ bên trên)
 5. Nếu không có H3 -> dùng bullets (3-5 gợi ý)
 6. note: ghi số thật "[X/{total_crawled} đối thủ]"
@@ -967,19 +967,7 @@ def render_outline_view(data: dict, wc_stats: dict):
                                file_name=f"h2_{idx+1}_{_safe_filename(block["h2"], 20)}.txt",
                                mime="text/plain", key=f"dl_h2_{idx}", help="Tải về section này")
 
-    # FAQ - hien thi neu AI gen ra
-    faq = data.get("faq") or []
-    if faq:
-        faq_rows = "".join(
-            '<div class="h3-row"><span class="h3-arrow">Q</span>' + q + '</div>'
-            for q in faq
-        )
-        st.markdown(
-            '<div class="sec sec-faq" style="margin-top:12px">'
-            '<div class="sec-head"><span class="badge b-faq">FAQ</span> Câu hỏi thường gặp</div>'
-            '<div class="sec-body">' + faq_rows + '</div>'
-            '</div>',
-            unsafe_allow_html=True)
+
 
 # ═══════════════════════════════════════════════════════════════════
 # Feature #2: EDITABLE OUTLINE
@@ -1082,10 +1070,6 @@ def outline_to_text(keyword: str, data: dict, wc_stats: dict) -> str:
         for h in b.get("h3s",[]):      lines.append(f"   H3: {h}")
         for pt in b.get("bullets",[]): lines.append(f"   * {pt}")
         lines.append("")
-    if data.get("faq"):
-        lines.append("FAQ:")
-        for q in data["faq"]:
-            lines.append(f"  Q: {q}")
     return "\n".join(lines)
 
 def _safe_filename(keyword: str, max_len: int = 40) -> str:
