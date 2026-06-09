@@ -1405,20 +1405,55 @@ if st.session_state.outline and not st.session_state.running:
     # Export
     st.divider()
     txt = outline_to_text(kw, export_data, wc)
-    c1,c2,c3 = st.columns([2,2,4])
+
+    # Helper: generate compact copy strings
+    def _copy_h1_h2(data: dict) -> str:
+        lines = []
+        if data.get("h1"):
+            lines.append(f"H1: {data['h1']}")
+        for i, b in enumerate(data.get("outline", []), 1):
+            lines.append(f"H2 {i}: {b['h2']}")
+        return "\n".join(lines)
+
+    def _copy_h1_h2_h3(data: dict) -> str:
+        lines = []
+        if data.get("h1"):
+            lines.append(f"H1: {data['h1']}")
+        for i, b in enumerate(data.get("outline", []), 1):
+            lines.append(f"H2 {i}: {b['h2']}")
+            for h in b.get("h3s", []):
+                lines.append(f"   H3: {h}")
+            for pt in b.get("bullets", []):
+                lines.append(f"   • {pt}")
+        return "\n".join(lines)
+
+    txt_h1h2    = _copy_h1_h2(export_data)
+    txt_h1h2h3  = _copy_h1_h2_h3(export_data)
+
+    c1, c2, c3, c4 = st.columns([2, 2, 2, 2])
     with c1:
         st.download_button("⬇️ Download .txt", data=txt,
                            file_name=f"outline_{kw[:40].replace(' ','_')}.txt",
                            mime="text/plain", use_container_width=True)
     with c2:
+        st.download_button("📋 H1 + H2", data=txt_h1h2,
+                           file_name=f"h1h2_{kw[:30].replace(' ','_')}.txt",
+                           mime="text/plain", use_container_width=True,
+                           help="Copy H1 và tất cả H2")
+    with c3:
+        st.download_button("📋 H1 + H2 + H3", data=txt_h1h2h3,
+                           file_name=f"h1h2h3_{kw[:30].replace(' ','_')}.txt",
+                           mime="text/plain", use_container_width=True,
+                           help="Copy H1, H2 và H3 / bullets")
+    with c4:
         if st.session_state.edited_outline:
             if st.button("↩️ Reset edits", use_container_width=True):
                 st.session_state.edited_outline = None
                 st.session_state.edit_mode = False
                 st.rerun()
-    with c3:
-        with st.expander("📋 Copy raw text"):
-            st.code(txt, language=None)
+
+    with st.expander("📋 Copy raw text"):
+        st.code(txt, language=None)
 
     with st.expander("🔧 Raw JSON"):
         st.json(export_data)
