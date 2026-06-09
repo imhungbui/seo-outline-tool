@@ -725,23 +725,24 @@ CLUSTER_SYSTEM = """Ban la chuyen gia phan tich noi dung SEO.
 Nhiem vu: phan tich heading H2/H3 tu cac trang doi thu, tong hop thanh danh sach topic UNIQUE.
 
 BUOC 1 - LOC BOILERPLATE (loai bo truoc):
-- Xoa tat ca heading chua ten mien, URL, ten trang web (vi du: "(vinuni.edu.vn)", "[site.com]")
+- Xoa heading chua ten mien, URL (vi du: "(vinuni.edu.vn)", "[site.com]")
 - Xoa: menu, nav, footer, sidebar, CTA, quang cao, "bai viet cung chuyen muc", "xem them"
-- Xoa: heading chi la ten trang web hoac thuong hieu
 
-BUOC 2 - GOP Y NGHIA:
-1. Gop heading CUNG Y NGHIA du dien dat khac nhau -> 1 topic duy nhat
-   Vi du: "Cac loai hinh SEO" + "Phan loai SEO" + "Cac truong phai SEO" -> 1 topic
-   Vi du: "Loi ich SEO" + "Vai tro SEO" + "SEO trong Marketing" -> 1 topic
-   Vi du: "Xu huong SEO" xuat hien nhieu noi -> gop vao 1 H2 duy nhat
-2. MOI CHU DE chi xuat hien 1 lan - neu thay 2 H2 overlap > 50% noi dung -> gop lai
-3. Sau khi gop, tu hoi: "Con H2 nao trung nhau khong?" -> neu co thi gop tiep
+BUOC 2 - GOP Y NGHIA (chi gop nhung gi THUC SU trung):
+1. Gop heading CUNG Y NGHIA -> 1 topic
+   Vi du DUNG: "Cac loai hinh SEO" + "Phan loai SEO" + "Cac truong phai SEO" -> 1 H2
+   Vi du SAI: "Vai tro SEO" + "Loai hinh SEO" -> KHAC NHAU, giu 2 H2 rieng
+2. KHONG gop cac chu de chi co lien quan nhung khac noi dung chinh:
+   - "Khai niem SEO" vs "Cach hoat dong SEO" -> 2 H2 rieng
+   - "Loai hinh SEO" vs "Loi ich SEO" -> 2 H2 rieng
+   - "Cong cu SEO" vs "Ky nang SEO" -> 2 H2 rieng
+3. Sau khi gop, tu hoi: "Con H2 nao THUC SU trung nhau khong?" -> neu co thi moi gop
 
-BUOC 3 - PHAN CAP:
-- H2 = chu de lon, bao quat
-- H3 = chi tiet cu the cua chu de H2 do (KHONG phai y ngang hang)
-- H3 phai UNIQUE trong cung 1 H2 (gop neu trung)
-- Loai H3 neu la boilerplate hoac khong lien quan den H2
+BUOC 3 - PHAN CAP + TACH H2:
+- Neu 1 H2 co qua nhieu H3 khac chu de -> TACH thanh nhieu H2 rieng
+  Vi du: H2 "Khai niem SEO" co H3 gom [dinh nghia, phan loai, vai tro, loi ich, loai hinh]
+  -> Tach thanh: H2 "Khai niem SEO", H2 "Loai hinh SEO", H2 "Vai tro va loi ich SEO"
+- H3 phai la chi tiet CUA H2 do, khong phai chu de moi
 
 Tra ve JSON thuan tuy:
 {
@@ -769,13 +770,12 @@ TIÊU ĐỀ TOP {len(serp_results)} KẾT QUẢ GOOGLE:
 HEADING CỦA {total} TRANG ĐỐI THỦ:
 {raw_block}
 
-Thuc hien theo 3 buoc trong system prompt:
-1. Loc boilerplate
-2. Gop tat ca heading cung y nghia (kiem tra ky - 2 lan)
-3. Phan cap H2/H3
+Thuc hien theo 3 buoc trong system prompt.
 
-Luu y: "Cac loai hinh SEO" va "Phan loai SEO" la CUNG Y - chi giu 1.
-Kiem tra lai output: co H2 nao overlap voi nhau khong? Neu co thi gop them.
+Luu y quan trong:
+- "Loai hinh SEO" va "Vai tro SEO" la KHAC NHAU -> giu 2 H2 rieng
+- "Loai hinh SEO" va "Phan loai SEO" la GIONG NHAU -> gop 1 H2
+- Neu 1 H2 co > 6 H3 khac chu de -> tach thanh nhieu H2 rieng
 Tra ve JSON thuan tuy, khong markdown fence."""
 
 # ── Call 2: Gen outline từ topic clusters ─────────────────────────
@@ -792,7 +792,7 @@ QUY TAC:
 5. Khong gioi han so H2 - lay het topics tu clusters
 6. faq: toi da 5 cau, chi cac cau HOI THUC SU khac nhau ve noi dung. Bo cac cau trung y voi nhau.
 7. note: Dien SO THAT vao, vi du "[4/5 đối thủ]" hoac "[2/5 đối thủ]". KHONG de "[X/N]".
-8. Toan bo text tieng Viet
+8. Toan bo text tieng Viet. Nam hien tai la 2026 - neu co nam trong heading thi dung 2026.
 
 JSON schema:
 {
