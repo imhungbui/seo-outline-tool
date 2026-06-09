@@ -584,12 +584,81 @@ def competitor_h2_stats(crawl_results: list[dict]) -> dict:
 
 # ═══════════════════════════════════════════════════════════════════
 # HEADING DEDUP + FREQUENCY
+# Approach: dedup H2 by text similarity (gộp H2 trùng ý)
+#           giữ raw H3 per-page để AI thấy đúng structure đối thủ
 # ═══════════════════════════════════════════════════════════════════
 def _similar(a: str, b: str, threshold: float=0.60) -> bool:
     a,b = a.lower().strip(), b.lower().strip()
     return a==b or SequenceMatcher(None,a,b).ratio()>=threshold
 
+def dedup_h2_only(crawl_results: list[dict]) -> list[dict]:
+    """
+    Chỉ dedup H2 — gộp H2 trùng ý, đếm tần suất.
+    H3 không dedup — giữ nguyên để format_per_page_structure dùng.
+    Returns: [{"tag":"h2","text","freq","domains"}]
+    """
+    h2_clusters: list[dict] = []
+    for r in crawl_results:
+        domain = domain_of(r["url"])
+        for h in (r.get("headings") or []):
+            if h["tag"] != "h2":
+                continue
+            text = h["text"]
+            matched = False
+            for c in h2_clusters:
+                if _similar(c["canonical"], text):
+                    if domain not in c["domains"]:
+                        c["domains"].append(domain)
+                    matched = True; break
+            if not matched:
+                h2_clusters.append({"canonical": text, "domains": [domain]})
+    return [
+        {"tag":"h2","text":c["canonical"],"freq":len(c["domains"]),"domains":c["domains"]}
+        for c in sorted(h2_clusters, key=lambda x: -len(x["domains"]))
+    ]
+
+def build_per_page_structure(crawl_results: list[dict]) -> str:
+    """
+    Format cấu trúc thực tế của từng trang đối thủ (H2 + tất cả H3 của nó).
+    AI thấy đúng cách đối thủ tổ chức nội dung — không bị mất H3 do dedup.
+    """
+    lines = []
+    for r in crawl_results:
+        hs = r.get("headings") or []
+        if not hs:
+            continue
+        domain = domain_of(r["url"])
+        lines.append(f"\n### {domain}")
+        cur_h2 = None
+        h3_buf: list[str] = []
+
+        def flush_h2():
+            if cur_h2:
+                lines.append(f"  H2: {cur_h2}")
+                for h3 in h3_buf:
+                    lines.append(f"    H3: {h3}")
+
+        for h in hs:
+            if h["tag"] == "h2":
+                flush_h2()
+                cur_h2 = h["text"]
+                h3_buf = []
+            elif h["tag"] == "h3" and cur_h2:
+                h3_buf.append(h["text"])
+        flush_h2()
+
+    return "\n".join(lines)
+
+def format_h2_freq_for_prompt(h2_deduped: list[dict], total_crawled: int) -> str:
+    """Format H2 frequency block — cho AI biết H2 nào phổ biến."""
+    return "\n".join(
+        f"  (đối thủ: {h['freq']}/{total_crawled}) {h['text']}"
+        for h in h2_deduped
+    )
+
+# Giữ lại cho crawl details tab (UI)
 def dedup_and_weight_headings(crawl_results: list[dict]) -> list[dict]:
+    """Legacy — chỉ dùng cho UI crawl details tab."""
     all_h: list[tuple] = []
     for r in crawl_results:
         for h in (r.get("headings") or []):
@@ -868,32 +937,13 @@ def build_prompt(keyword: str, lang: str, mod_intent: dict,
     )
 
     total_crawled = sum(1 for r in crawl_results if r.get("headings"))
-    headings_block = format_headings_for_prompt(deduped, total_crawled)
 
-    # H3 context: H2 nào có H3 thực sự từ đối thủ
-    h2_h3_map: dict[str, list[str]] = {}
-    for r in crawl_results:
-        hs = r.get("headings") or []
-        cur_h2 = None
-        for h in hs:
-            if h["tag"] == "h2":
-                cur_h2 = h["text"]
-                if cur_h2 not in h2_h3_map:
-                    h2_h3_map[cur_h2] = []
-            elif h["tag"] == "h3" and cur_h2:
-                if h["text"] not in h2_h3_map[cur_h2]:
-                    h2_h3_map[cur_h2].append(h["text"])
+    # H2 frequency — cho AI biết H2 nào phổ biến
+    h2_deduped = dedup_h2_only(crawl_results)
+    h2_freq_block = format_h2_freq_for_prompt(h2_deduped, total_crawled)
 
-    h3_context = ""
-    if h2_h3_map:
-        h3_lines = []
-        for h2_text, h3_list in list(h2_h3_map.items())[:20]:
-            if h3_list:
-                h3_lines.append(f"  H2: {h2_text}")
-                for h3 in h3_list[:6]:
-                    h3_lines.append(f"    -> H3: {h3}")
-        if h3_lines:
-            h3_context = "\nH3 THỰC TẾ TỪ ĐỐI THỦ:\n" + "\n".join(h3_lines) + "\n"
+    # Per-page structure — AI thấy đúng cách đối thủ tổ chức H2+H3
+    per_page = build_per_page_structure(crawl_results)
 
     wc_block = ""
     if wc_stats:
@@ -906,8 +956,7 @@ def build_prompt(keyword: str, lang: str, mod_intent: dict,
         h2_target = h2_stats['avg']
         h2_block = (f"H2 đối thủ: avg={h2_stats['avg']}, "
                     f"median={h2_stats['median']}, range={h2_stats['min']}-{h2_stats['max']}\n"
-                    f"TARGET: Tạo ĐÚNG {h2_target} H2 sections (+-1). "
-                    f"Không gộp H2 khác chủ đề chỉ để giảm số lượng.\n")
+                    f"TARGET: Tạo ĐÚNG {h2_target} H2 sections (+-1).\n")
 
     return f"""Từ khoá: "{keyword}"
 Ngôn ngữ: Tiếng Việt
@@ -920,17 +969,21 @@ TIÊU ĐỀ TOP {len(serp_results)} KẾT QUẢ GOOGLE:
 {titles_block}
 
 {wc_block}{h2_block}
-HEADING ĐỐI THỦ (đã dedup bằng code, {total_crawled} trang):
-{headings_block}
-{h3_context}
+TẦN SUẤT H2 ĐỐI THỦ (H2 nào phổ biến nhất):
+{h2_freq_block}
+
+CẤU TRÚC THỰC TẾ TỪNG TRANG ĐỐI THỦ (H2 + toàn bộ H3 của từng trang):
+{per_page}
+
 Hướng dẫn:
-1. (đối thủ: 5/{total_crawled} hoặc cao hơn): COPY NGUYÊN TEXT, source="competitor"
-2. (đối thủ: 3-4/{total_crawled}): paraphrase nhẹ, source="competitor"
-3. (đối thủ: 1-2/{total_crawled}): rewrite hoặc AI gap
-4. H3: CHỈ điền nếu đối thủ có (xem H3 THỰC TẾ bên trên)
-5. Nếu không có H3 -> dùng bullets (3-5 gợi ý)
-6. note: ghi số thật "[X/{total_crawled} đối thủ]"
-7. Tạo ĐÚNG {h2_target if h2_target else "đủ"} H2 (+-1) — nếu H2 đầu có quá nhiều H3 khác chủ đề thì TÁCH thành nhiều H2 riêng
+1. Dựa vào "Cấu trúc thực tế" để hiểu đối thủ tổ chức bài thế nào — KHÔNG tự tách H3 thành H2 mới nếu đối thủ để chung
+2. H2 tần suất cao (5/{total_crawled}+): COPY NGUYÊN TEXT, source="competitor"
+3. H2 tần suất trung (3-4/{total_crawled}): paraphrase nhẹ, source="competitor"
+4. H2 tần suất thấp (1-2/{total_crawled}): rewrite hoặc AI gap
+5. H3: lấy từ cấu trúc thực tế — nếu đối thủ có 10+ H3 trong 1 H2 thì giữ nguyên cấu trúc đó
+6. Không có H3 từ đối thủ -> dùng bullets (3-5 gợi ý)
+7. note: ghi số thật "[X/{total_crawled} đối thủ]"
+8. Tạo ĐÚNG {h2_target if h2_target else "đủ"} H2 (+-1)
 
 Trả về JSON thuần túy, không markdown fence."""
 
