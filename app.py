@@ -20,7 +20,7 @@ import pandas as pd
 
 # ── Page config ───────────────────────────────────────────────────
 st.set_page_config(
-    page_title="SEO Outline Generator",
+    page_title="Tạo Outline SEO",
     page_icon="🧭",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -189,14 +189,14 @@ INTENT_MODIFIERS = [
 ]
 
 INTENT_LABELS = {
-    "informational": ("📚 Informational","#dbeafe","#1e40af"),
-    "how-to":        ("🔧 How-to","#dcfce7","#166534"),
-    "listicle":      ("📋 Listicle","#fef9c3","#713f12"),
-    "commercial":    ("🛒 Commercial","#ede9fe","#5b21b6"),
-    "transactional": ("💳 Transactional","#fee2e2","#991b1b"),
-    "review":        ("⭐ Review","#fff7ed","#92400e"),
-    "comparison":    ("⚖️ Comparison","#f0fdf4","#166534"),
-    "mixed":         ("🔀 Mixed","#f1f5f9","#475569"),
+    "informational": ("📚 Thông tin","#dbeafe","#1e40af"),
+    "how-to":        ("🔧 Hướng dẫn","#dcfce7","#166534"),
+    "listicle":      ("📋 Danh sách","#fef9c3","#713f12"),
+    "commercial":    ("🛒 Thương mại","#ede9fe","#5b21b6"),
+    "transactional": ("💳 Giao dịch","#fee2e2","#991b1b"),
+    "review":        ("⭐ Đánh giá","#fff7ed","#92400e"),
+    "comparison":    ("⚖️ So sánh","#f0fdf4","#166534"),
+    "mixed":         ("🔀 Hỗn hợp","#f1f5f9","#475569"),
 }
 
 # ═══════════════════════════════════════════════════════════════════
@@ -611,19 +611,19 @@ def validate_outline(data: dict) -> list[str]:
         return ["Response is not a JSON object"]
     for field,ftype in REQUIRED_FIELDS.items():
         if field not in data:
-            errors.append(f"Missing required field: '{field}'")
+            errors.append(f"Thiếu trường bắt buộc: '{field}'")
         elif not isinstance(data[field],ftype):
-            errors.append(f"Field '{field}' wrong type")
+            errors.append(f"Trường '{field}' sai kiểu dữ liệu")
     if "article_type" in data and data["article_type"] not in VALID_ARTICLE_TYPES:
-        errors.append(f"Unknown article_type '{data['article_type']}'")
+        errors.append(f"Loại bài không hợp lệ '{data['article_type']}'")
     if "outline" in data and isinstance(data["outline"],list):
         if len(data["outline"])==0:
-            errors.append("'outline' is empty")
+            errors.append("Outline rỗng")
         for i,item in enumerate(data["outline"]):
             if not isinstance(item,dict):
-                errors.append(f"outline[{i}] not an object"); continue
+                errors.append(f"outline[{i}] không phải object"); continue
             if "h2" not in item or not isinstance(item.get("h2"),str) or not item["h2"].strip():
-                errors.append(f"outline[{i}] missing/empty 'h2'")
+                errors.append(f"outline[{i}] thiếu hoặc rỗng 'h2'")
             if item.get("source") not in VALID_SOURCES:
                 item["source"]="ai"
             if not isinstance(item.get("h3s"),list):
@@ -641,12 +641,15 @@ def fix_outline_data(data: dict) -> dict:
     for item in data.get("outline",[]):
         if isinstance(item,dict):
             if item.get("source") not in VALID_SOURCES: item["source"]="ai"
-            if not isinstance(item.get("h3s"),list):    item["h3s"]=[]
+            if not isinstance(item.get("h3s"),list):     item["h3s"]=[]
             if not isinstance(item.get("bullets"),list): item["bullets"]=[]
-            # If both h3s and bullets present, keep h3s and clear bullets
-            # (competitor had real H3s, bullets redundant)
+            # H3 chỉ giữ nếu có ≥ 2 — nếu chỉ có 1 H3 thì chuyển sang bullets
+            if len(item["h3s"]) == 1:
+                item["bullets"] = item["h3s"] + item["bullets"]
+                item["h3s"] = []
+            # Nếu có cả h3s (≥2) lẫn bullets thì bỏ bullets
             if item.get("h3s") and item.get("bullets"):
-                item["bullets"]=[]
+                item["bullets"] = []
     return data
 
 # ═══════════════════════════════════════════════════════════════════
@@ -717,6 +720,7 @@ QUY TẮC QUAN TRỌNG:
 2. H3:
    - CHỈ đưa vào h3s[] nếu đối thủ thực sự có H3 dưới H2 đó trong data crawl
    - Nếu đối thủ KHÔNG có H3 → để h3s=[] và dùng "bullets" để gợi ý nội dung viết gì
+   - H3 phải có TỐI THIỂU 2 items — nếu chỉ có 1 H3 thì để vào bullets thay vì h3s
    - bullets là gợi ý ngắn (3-6 từ) về điểm cần cover trong section đó
    - Không được bịa H3 khi đối thủ không có
 
@@ -740,7 +744,7 @@ JSON schema (tất cả field bắt buộc):
       "source": "competitor|ai|hybrid",
       "h3s": ["string — CHỈ có nếu đối thủ crawl được có H3 thực sự"],
       "bullets": ["gợi ý nội dung ngắn nếu không có H3"],
-      "note": "string — ghi [X/N competitors] để biết tần suất"
+      "note": "[X/N competitors] — CHỈ ghi tần suất, không ghi source"
     }}
   ],
   "faq": []
@@ -823,7 +827,7 @@ Instructions:
 7. faq = [] (bỏ trống hoàn toàn)
 8. Generate EXACTLY {h2_stats.get('target','6-8') if h2_stats else '6-8'} H2 sections (±1)
 9. All text in Vietnamese
-10. note = ghi "[X/{total_crawled} competitors]" cho mỗi H2
+10. note = CHỈ ghi tần suất dạng "[X/{total_crawled} competitors]", ví dụ "[4/5 competitors]". KHÔNG ghi source= hay bất kỳ thứ gì khác vào note.
 
 Return pure JSON only."""
 
@@ -841,7 +845,7 @@ def render_outline_view(data: dict, wc_stats: dict):
 
     st.markdown(f"""
     <div class="h1-card">
-      <div class="h1-label">H1 — Article Title</div>
+      <div class="h1-label">H1 — Tiêu đề bài viết</div>
       <div class="h1-text">{h1}</div>
       <div class="meta-text"><b>Meta:</b> {meta}</div>
     </div>""", unsafe_allow_html=True)
@@ -856,8 +860,8 @@ def render_outline_view(data: dict, wc_stats: dict):
       <span class="pill" style="background:{ibg};color:{icolor};border-color:{ibg}">{il}</span>
       {wc_pill}
       <span class="pill">📊 <b>{len(outline)}</b> H2</span>
-      <span class="pill">🔵 <b>{comp_n}</b> competitor</span>
-      <span class="pill">🟢 <b>{ai_n}</b> AI</span>
+      <span class="pill">🔵 <b>{comp_n}</b> đối thủ</span>
+      <span class="pill">🟢 <b>{ai_n}</b> AI mới</span>
     </div>""", unsafe_allow_html=True)
 
     if intent:
@@ -866,24 +870,26 @@ def render_outline_view(data: dict, wc_stats: dict):
     if angles:
         tags = "".join(f'<span class="angle-tag">✦ {a}</span>' for a in angles)
         st.markdown(f"""<div class="angles-card">
-          <div class="angles-title">💡 Unique angles</div>{tags}</div>""",
+          <div class="angles-title">💡 Góc nhìn độc đáo</div>{tags}</div>""",
           unsafe_allow_html=True)
 
     if wc_stats:
         pct = min(int(wc_stats["target"]/(wc_stats["max"] or 1)*100),100)
         st.markdown(f"""
         <div style="font-size:0.75rem;color:#64748b;margin-bottom:2px">
-          WC target vs max ({wc_stats['min']:,}–{wc_stats['max']:,})</div>
+          Số từ mục tiêu so với max ({wc_stats['min']:,}–{wc_stats['max']:,})</div>
         <div class="wc-bar-wrap"><div class="wc-bar" style="width:{pct}%"></div></div>
         """, unsafe_allow_html=True)
 
     st.markdown('<div class="sec-label">📑 Outline</div>', unsafe_allow_html=True)
     for idx,block in enumerate(outline):
         src = block.get("source","ai")
-        if src=="competitor":  sc,bc,bt = "sec-comp","b-comp","Competitor"
-        elif src=="hybrid":    sc,bc,bt = "sec-hyb","b-hyb","Hybrid"
+        if src=="competitor":  sc,bc,bt = "sec-comp","b-comp","Đối thủ"
+        elif src=="hybrid":    sc,bc,bt = "sec-hyb","b-hyb","Kết hợp"
         else:                  sc,bc,bt = "sec-ai","b-ai","AI ✦"
-        note = block.get("note","")
+        # Clean note: strip nếu AI nhét source= vào đây thay vì frequency
+        raw_note = block.get("note","")
+        note = "" if re.search(r'source\s*=', raw_note, re.IGNORECASE) else raw_note
         nh   = (f'<span style="font-size:0.75rem;color:#94a3b8;font-weight:400"> — {note}</span>'
                 if note else "")
 
@@ -932,7 +938,7 @@ def render_outline_view(data: dict, wc_stats: dict):
             for b in bullets: lines.append(f"  • {b}")
             st.download_button("📋", data="\n".join(lines),
                                file_name=f"h2_{idx+1}.txt",
-                               mime="text/plain", key=f"dl_h2_{idx}", help="Download section")
+                               mime="text/plain", key=f"dl_h2_{idx}", help="Tải về section này")
 
 # ═══════════════════════════════════════════════════════════════════
 # Feature #2: EDITABLE OUTLINE
@@ -940,15 +946,15 @@ def render_outline_view(data: dict, wc_stats: dict):
 def outline_to_df(data: dict) -> pd.DataFrame:
     """Convert outline JSON → flat DataFrame for st.data_editor."""
     rows = []
-    rows.append({"Level":"H1","Text":data.get("h1",""),"Source":"—","Note":""})
+    rows.append({"Level":"H1","Text":data.get("h1",""),"Nguồn":"—","Ghi chú":""})
     for block in data.get("outline",[]):
         src = block.get("source","ai").capitalize()
-        rows.append({"Level":"H2","Text":block.get("h2",""),"Source":src,
-                     "Note":block.get("note","")})
+        rows.append({"Level":"H2","Text":block.get("h2",""),"Nguồn":src,
+                     "Ghi chú":block.get("note","")})
         for h3 in block.get("h3s",[]):
-            rows.append({"Level":"H3","Text":h3,"Source":"","Note":""})
+            rows.append({"Level":"H3","Text":h3,"Nguồn":"","Ghi chú":""})
         for b in block.get("bullets",[]):
-            rows.append({"Level":"Bullet","Text":b,"Source":"","Note":""})
+            rows.append({"Level":"Bullet","Text":b,"Nguồn":"","Ghi chú":""})
     return pd.DataFrame(rows)
 
 def df_to_outline(df: pd.DataFrame, original: dict) -> dict:
@@ -967,10 +973,10 @@ def df_to_outline(df: pd.DataFrame, original: dict) -> dict:
             result["h1"] = text
         elif lvl == "H2":
             if current_h2: h2_blocks.append(current_h2)
-            src = (row.get("Source") or "ai").lower()
+            src = (row.get("Nguồn") or "ai").lower()
             if src not in VALID_SOURCES: src = "ai"
             current_h2 = {"h2":text,"source":src,"h3s":[],"bullets":[],
-                          "note":(row.get("Note") or "").strip()}
+                          "note":(row.get("Ghi chú") or "").strip()}
         elif lvl == "H3":
             if current_h2 is None:
                 current_h2 = {"h2":"(untitled)","source":"ai","h3s":[],"bullets":[],"note":""}
@@ -989,8 +995,8 @@ def render_editor(data: dict, wc_stats: dict) -> dict:
     Feature #2: Editable outline using st.data_editor.
     Returns possibly-modified outline dict.
     """
-    st.markdown('<div class="edit-banner">✏️ <b>Edit mode</b> — click any cell to edit. '
-                'Add/delete rows. Level: H1 / H2 / H3 / Bullet</div>',
+    st.markdown('<div class="edit-banner">✏️ <b>Chế độ chỉnh sửa</b> — nhấn vào ô để sửa. '
+                'Thêm/xóa hàng. Level: H1 / H2 / H3 / Bullet</div>',
                 unsafe_allow_html=True)
 
     df = outline_to_df(data)
@@ -1004,10 +1010,10 @@ def render_editor(data: dict, wc_stats: dict) -> dict:
                 "Level", options=["H1","H2","H3","Bullet"], width="small"
             ),
             "Text":   st.column_config.TextColumn("Text",   width="large"),
-            "Source": st.column_config.SelectboxColumn(
-                "Source", options=["Competitor","Ai","Hybrid","—",""], width="small"
+            "Nguồn": st.column_config.SelectboxColumn(
+                "Nguồn", options=["Competitor","Ai","Hybrid","—",""], width="small"
             ),
-            "Note":   st.column_config.TextColumn("Note",   width="medium"),
+            "Ghi chú":   st.column_config.TextColumn("Ghi chú",   width="medium"),
         },
         key="outline_editor",
         height=min(60 + len(df)*35, 600),
@@ -1027,7 +1033,7 @@ def outline_to_text(keyword: str, data: dict, wc_stats: dict) -> str:
         lines.append(f"Target: ~{wc_stats['target']:,} words (median {wc_stats['median']:,})")
     lines.append("")
     for i,b in enumerate(data.get("outline",[]),1):
-        lines.append(f"{b['h2']}  [{b.get('source','ai')}]")
+        lines.append(f"{b['h2']}")
         for h in b.get("h3s",[]):      lines.append(f"   H3: {h}")
         for pt in b.get("bullets",[]): lines.append(f"   • {pt}")
         lines.append("")
@@ -1045,13 +1051,13 @@ def run_ai_and_validate(system, prompt, key, stream_slot):
     except ValueError as e:
         stream_slot.empty(); st.error(str(e)); return None, raw
     except Exception as e:
-        stream_slot.empty(); st.error(f"Streaming error: {e}"); return None, raw
+        stream_slot.empty(); st.error(f"Lỗi streaming: {e}"); return None, raw
 
     try:
         data = parse_json_response(raw)
     except json.JSONDecodeError as e:
-        st.error(f"AI returned invalid JSON: {e}")
-        with st.expander("Raw response"): st.code(raw[:3000])
+        st.error(f"AI trả về JSON không hợp lệ: {e}")
+        with st.expander("Dữ liệu thô (debug)"): st.code(raw[:3000])
         return None, raw
 
     errors = validate_outline(data)
@@ -1059,9 +1065,9 @@ def run_ai_and_validate(system, prompt, key, stream_slot):
     warns  = [e for e in errors if e not in fatal]
     for w in warns: st.warning(f"⚠️ {w}")
     if fatal:
-        st.markdown('<div class="val-err">❌ <b>Validation failed:</b><br>'
+        st.markdown('<div class="val-err">❌ <b>Lỗi dữ liệu AI trả về:</b><br>'
                     + "<br>".join(fatal)+"</div>", unsafe_allow_html=True)
-        with st.expander("Raw response"): st.code(raw[:3000])
+        with st.expander("Dữ liệu thô (debug)"): st.code(raw[:3000])
         return None, raw
     return fix_outline_data(data), raw
 
@@ -1081,56 +1087,56 @@ for k,v in SESS_DEFAULTS.items():
 # SIDEBAR
 # ═══════════════════════════════════════════════════════════════════
 with st.sidebar:
-    st.header("⚙️ Settings")
+    st.header("⚙️ Cài đặt")
 
     with st.expander("🔑 API Keys", expanded=True):
-        dfs_login     = st.text_input("DataForSEO Login",    placeholder="email@example.com")
-        dfs_password  = st.text_input("DataForSEO Password", type="password")
+        dfs_login     = st.text_input("DataForSEO Login", placeholder="email@example.com")
+        dfs_password  = st.text_input("Mật khẩu DataForSEO", type="password")
         anthropic_key = st.text_input("OpenAI API Key", type="password", placeholder="sk-...")
 
     location_code, serp_lang = 2704, "vi"
 
-    with st.expander("🕷️ Crawl"):
-        t1 = st.slider("Timeout attempt 1 (s)", 5, 15, 8)
-        t2 = st.slider("Timeout retry (s)", 10, 30, 18)
+    with st.expander("🕷️ Crawl trang web"):
+        t1 = st.slider("Timeout lần 1 (giây)", 5, 15, 8)
+        t2 = st.slider("Timeout thử lại (giây)", 10, 30, 18)
         # Feature #1: Jina toggle
-        use_jina = st.toggle("Jina Reader fallback",value=True,
-            help="Falls back to r.jina.ai when direct crawl fails (Cloudflare, etc.)")
+        use_jina = st.toggle("Dùng Jina khi bị chặn", value=True,
+            help="Dự phòng r.jina.ai khi trang dùng Cloudflare")
 
     st.divider()
-    st.caption("🔒 Keys live in session only.")
-    st.caption(f"🔧 BS4 parser: **{BS4_PARSER}**")
+    st.caption("🔒 API key chỉ lưu trong phiên làm việc.")
+    st.caption(f"🔧 Parser HTML: **{BS4_PARSER}**")
 
     if st.session_state.kw_history:
         st.divider()
-        st.markdown("**🕐 Recent keywords**")
+        st.markdown("**🕐 Từ khoá gần đây**")
         for kh in reversed(st.session_state.kw_history[-8:]):
             st.caption(f"• {kh}")
 
     if st.session_state.wc_stats:
         st.divider()
         wc = st.session_state.wc_stats
-        st.caption(f"**WC:** {wc['min']:,}–{wc['max']:,} · target ~{wc['target']:,}")
+        st.caption(f"**Số từ:** {wc['min']:,}–{wc['max']:,} · mục tiêu ~{wc['target']:,}")
     if st.session_state.h2_stats:
         h2 = st.session_state.h2_stats
-        st.caption(f"**H2:** avg={h2['avg']} median={h2['median']} range={h2['min']}–{h2['max']}")
+        st.caption(f"**H2:** tb={h2['avg']} trung vị={h2['median']} khoảng={h2['min']}–{h2['max']}")
 
 # ═══════════════════════════════════════════════════════════════════
 # MAIN
 # ═══════════════════════════════════════════════════════════════════
-st.title("🧭 SEO Outline Generator")
+st.title("🧭 Tạo Outline SEO")
 
 kw_col,btn_col,reg_col = st.columns([5,1.5,1.8])
 with kw_col:
-    keyword = st.text_input("kw", placeholder="e.g.  cách học tiếng anh  /  best project management tools",
+    keyword = st.text_input("kw", placeholder="vd: cách học tiếng anh, affiliate marketing là gì, review điện thoại samsung",
                              label_visibility="collapsed", disabled=st.session_state.running)
 with btn_col:
-    run_btn = st.button("🚀 Generate", type="primary", use_container_width=True,
+    run_btn = st.button("🚀 Tạo Outline", type="primary", use_container_width=True,
                         disabled=st.session_state.running)
 with reg_col:
-    regen_btn = st.button("🔄 New Outline", use_container_width=True,
+    regen_btn = st.button("🔄 Tạo Lại", use_container_width=True,
                           disabled=(not st.session_state.crawl) or st.session_state.running,
-                          help="Re-run AI — skips crawl")
+                          help="Chạy lại AI — giữ nguyên dữ liệu crawl")
 
 # Live detect preview
 if keyword and not st.session_state.running:
@@ -1144,8 +1150,8 @@ if keyword and not st.session_state.running:
                 margin:6px 0 14px;font-size:0.82rem;">
       <span class="badge b-lang">🇻🇳 VI</span>
       <span class="badge" style="background:{ibg};color:{icolor}">{il}</span>
-      <span style="color:{cc};font-weight:600">{intent_hint['confidence']} confidence</span>
-      <span style="color:#94a3b8">signals: {sig}</span>
+      <span style="color:{cc};font-weight:600">{intent_hint['confidence']} độ tin cậy</span>
+      <span style="color:#94a3b8">tín hiệu: {sig}</span>
     </div>""", unsafe_allow_html=True)
 else:
     eff_lang    = "vi"
@@ -1156,10 +1162,10 @@ else:
 # ═══════════════════════════════════════════════════════════════════
 if run_btn and not st.session_state.running:
     errs=[]
-    if not keyword.strip(): errs.append("Please enter a keyword.")
-    if not dfs_login:       errs.append("DataForSEO login required.")
-    if not dfs_password:    errs.append("DataForSEO password required.")
-    if not anthropic_key:   errs.append("OpenAI API key required.")
+    if not keyword.strip(): errs.append("Vui lòng nhập từ khoá.")
+    if not dfs_login:       errs.append("Vui lòng nhập DataForSEO login.")
+    if not dfs_password:    errs.append("Vui lòng nhập DataForSEO password.")
+    if not anthropic_key:   errs.append("Vui lòng nhập OpenAI API key.")
     if errs:
         for e in errs: st.error(e)
         st.stop()
@@ -1183,25 +1189,25 @@ if st.session_state.running and not regen_btn:
 
     try:
         # Step 1: SERP
-        with st.status("🔍 Fetching SERP...", expanded=False) as s:
+        with st.status("🔍 Đang lấy kết quả Google...", expanded=False) as s:
             try:
                 serp = fetch_serp(kw, dfs_login, dfs_password, location_code, serp_lang)
                 st.session_state.serp = serp
                 si = intent_from_serp_titles(serp)
                 st.session_state.serp_intent = si
-                s.update(label=f"✅ SERP — {len(serp)} URLs · intent: {si.get('intent','?')}",
+                s.update(label=f"✅ SERP — {len(serp)} trang · intent: {si.get('intent','?')}",
                          state="complete")
             except ValueError as e:
-                s.update(label="❌ SERP failed", state="error"); st.error(str(e))
+                s.update(label="❌ Lỗi lấy SERP", state="error"); st.error(str(e))
                 st.session_state.running=False; st.stop()
             except Exception as e:
-                s.update(label="❌ SERP failed", state="error"); st.error(f"Unexpected: {e}")
+                s.update(label="❌ Lỗi lấy SERP", state="error"); st.error(f"Lỗi không xác định: {e}")
                 st.session_state.running=False; st.stop()
 
         if not serp:
-            st.error("No valid SERP results."); st.session_state.running=False; st.stop()
+            st.error("Không tìm thấy kết quả SERP hợp lệ."); st.session_state.running=False; st.stop()
 
-        with st.expander(f"📋 Google Top {len(serp)} — {kw}", expanded=False):
+        with st.expander(f"📋 Kết quả Google Top {len(serp)} — {kw}", expanded=False):
             for r in serp:
                 st.markdown(f"""<div class="dom-card">
                   <b>#{r['rank']}</b> {r['title']}<br>
@@ -1213,7 +1219,7 @@ if st.session_state.running and not regen_btn:
         prog      = st.progress(0)
         log_slot  = st.empty()
         log: list[str] = []
-        crawl_hdr.markdown("**🕷️ Crawling pages in parallel...**")
+        crawl_hdr.markdown("**🕷️ Đang crawl các trang song song...**")
         t0 = time.time()
 
         def on_crawl(done, total, r):
@@ -1250,23 +1256,23 @@ if st.session_state.running and not regen_btn:
         retry_n = sum(1 for r in crawl if r.get("status")=="retry_ok")
         fail_n  = sum(1 for r in crawl if r.get("status")=="fail")
         method_parts = []
-        if dfs_n:   method_parts.append(f"🟢 {dfs_n} via DFS On-Page")
-        if jina_n:  method_parts.append(f"🟣 {jina_n} via Jina")
-        if retry_n: method_parts.append(f"{retry_n} retried")
-        if fail_n:  method_parts.append(f"{fail_n} failed")
+        if dfs_n:   method_parts.append(f"🟢 {dfs_n} qua DFS On-Page")
+        if jina_n:  method_parts.append(f"🟣 {jina_n} qua Jina")
+        if retry_n: method_parts.append(f"{retry_n} thử lại")
+        if fail_n:  method_parts.append(f"{fail_n} thất bại")
         method_str = " · " + " · ".join(method_parts) if method_parts else ""
         st.success(
-            f"✅ Crawled {ok_n}/{len(crawl)} in **{elapsed:.1f}s**"
+            f"✅ Crawl {ok_n}/{len(crawl)} trang trong **{elapsed:.1f}s**"
             f"{method_str}"
-            f" · {len(deduped)} unique headings"
+            f" · {len(deduped)} heading duy nhất"
         )
         if h2_stats:
-            st.info(f"📊 Competitor H2 count: avg={h2_stats['avg']} · "
-                    f"median={h2_stats['median']} · range {h2_stats['min']}–{h2_stats['max']} "
-                    f"→ **target: {h2_stats['target']} H2 sections**")
+            st.info(f"📊 Số H2 đối thủ: tb={h2_stats['avg']} · "
+                    f"trung vị={h2_stats['median']} · khoảng {h2_stats['min']}–{h2_stats['max']} "
+                    f"→ **mục tiêu: {h2_stats['target']} H2**")
 
-        with st.expander("🕷️ Crawl details", expanded=False):
-            tab1,tab2 = st.tabs(["Per-page","Deduplicated (freq)"])
+        with st.expander("🕷️ Chi tiết crawl", expanded=False):
+            tab1,tab2 = st.tabs(["Theo trang","Đã gộp (tần suất)"])
             with tab1:
                 for r in crawl:
                     d  = domain_of(r["url"])
@@ -1309,7 +1315,7 @@ if st.session_state.running and not regen_btn:
                                 unsafe_allow_html=True)
 
         # Step 3: AI
-        st.markdown("**🤖 Generating outline...**")
+        st.markdown("**🤖 Đang tạo outline...**")
         ss = st.empty()
         ss.markdown('<div class="stream-box">Connecting to OpenAI...</div>',
                     unsafe_allow_html=True)
@@ -1319,7 +1325,7 @@ if st.session_state.running and not regen_btn:
         od, _ = run_ai_and_validate(SYSTEM_PROMPT, prompt, anthropic_key, ss)
         if od:
             st.session_state.outline = od
-            st.success("✅ Outline ready!")
+            st.success("✅ Outline đã sẵn sàng!")
 
     finally:
         st.session_state.running = False
@@ -1327,7 +1333,7 @@ if st.session_state.running and not regen_btn:
 # PIPELINE: Regenerate
 elif regen_btn and not st.session_state.running:
     if not anthropic_key:
-        st.error("OpenAI API key required."); st.stop()
+        st.error("Vui lòng nhập OpenAI API key."); st.stop()
     st.session_state.running    = True
     st.session_state.edit_mode  = False
     st.session_state.edited_outline = None
@@ -1341,14 +1347,14 @@ elif regen_btn and not st.session_state.running:
         si      = st.session_state.serp_intent or {}
         serp_r  = st.session_state.serp or []
         crawl_r = st.session_state.crawl or []
-        st.markdown("**🔄 Regenerating outline...**")
+        st.markdown("**🔄 Đang tạo lại outline...**")
         ss = st.empty()
         ss.markdown('<div class="stream-box">Connecting...</div>', unsafe_allow_html=True)
         prompt = build_prompt(kw, lang, hint, si, serp_r, deduped, crawl_r, wc, h2)
         od, _ = run_ai_and_validate(SYSTEM_PROMPT, prompt, anthropic_key, ss)
         if od:
             st.session_state.outline = od
-            st.success("✅ New outline ready!")
+            st.success("✅ Outline mới đã sẵn sàng!")
     finally:
         st.session_state.running = False
 
@@ -1366,9 +1372,9 @@ if st.session_state.outline and not st.session_state.running:
     with hcol:
         st.subheader(f"📝 Outline — {kw}")
     with ecol:
-        edit_mode = st.toggle("✏️ Edit outline", value=st.session_state.edit_mode,
+        edit_mode = st.toggle("✏️ Chỉnh sửa outline", value=st.session_state.edit_mode,
                               key="edit_toggle",
-                              help="Switch between view and edit mode")
+                              help="Chuyển giữa xem và chỉnh sửa")
         st.session_state.edit_mode = edit_mode
 
     # Get the working outline (edited or original)
@@ -1379,7 +1385,7 @@ if st.session_state.outline and not st.session_state.running:
         edited = render_editor(working, wc)
         st.session_state.edited_outline = edited
         # Preview in real-time below editor
-        with st.expander("👁️ Preview edited outline", expanded=False):
+        with st.expander("👁️ Xem trước outline đã sửa", expanded=False):
             render_outline_view(edited, wc)
         export_data = edited
     else:
@@ -1416,7 +1422,7 @@ if st.session_state.outline and not st.session_state.running:
 
     c1, c2, c3, c4 = st.columns([2, 2, 2, 2])
     with c1:
-        st.download_button("⬇️ Download .txt", data=txt,
+        st.download_button("⬇️ Tải xuống .txt", data=txt,
                            file_name=f"outline_{kw[:40].replace(' ','_')}.txt",
                            mime="text/plain", use_container_width=True)
     with c2:
@@ -1427,15 +1433,15 @@ if st.session_state.outline and not st.session_state.running:
             st.code(txt_h1h2h3, language=None)
     with c4:
         if st.session_state.edited_outline:
-            if st.button("↩️ Reset edits", use_container_width=True):
+            if st.button("↩️ Hoàn tác chỉnh sửa", use_container_width=True):
                 st.session_state.edited_outline = None
                 st.session_state.edit_mode = False
                 st.rerun()
 
-    with st.expander("📋 Copy raw text"):
+    with st.expander("📋 Sao chép toàn bộ"):
         st.code(txt, language=None)
 
-    with st.expander("🔧 Raw JSON"):
+    with st.expander("🔧 Dữ liệu JSON"):
         st.json(export_data)
 
 # Landing
@@ -1446,16 +1452,15 @@ elif not st.session_state.outline:
       <div style="font-size:2.5rem">🧭</div>
       <div style="font-size:1.05rem;font-weight:600;margin:8px 0 4px">SEO Outline Generator</div>
       <div style="color:#64748b;font-size:0.88rem">
-        Keyword → DataForSEO Top 10 → Crawl + Jina fallback → AI outline
+        Từ khoá → DataForSEO Top 5 → Crawl + Jina → Outline AI
       </div>
     </div>""", unsafe_allow_html=True)
 
     st.markdown("""
-    **v6 — 3 new features:**
-    - 🟣 **Jina Reader fallback** — `r.jina.ai/URL` khi trang bị Cloudflare block.
-      Toggle trong sidebar. 0 API key cần thiết.
-    - ✏️ **Editable outline** — toggle "Edit outline" sau khi generate.
-      Sửa H1/H2/H3 trực tiếp trong bảng, preview real-time, rồi export.
-    - 📊 **Target H2 count** — tính avg + median H2 của competitor,
-      đưa vào prompt làm constraint cứng (±1). Outline nhất quán hơn.
+    **Hướng dẫn sử dụng:**
+    - 🔑 Nhập API keys vào sidebar (DataForSEO + OpenAI)
+    - ⌨️ Gõ từ khoá tiếng Việt vào ô nhập → nhấn **Tạo Outline**
+    - 🕷️ Tool tự động crawl top 5 Google và phân tích đối thủ
+    - 📝 Outline được tạo dựa trên cấu trúc đối thủ + AI bổ sung
+    - ✏️ Nhấn "Chỉnh sửa outline" để sửa trực tiếp trước khi export
     """)
