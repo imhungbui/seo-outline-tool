@@ -202,22 +202,6 @@ INTENT_LABELS = {
 # ═══════════════════════════════════════════════════════════════════
 # LANGUAGE + INTENT
 # ═══════════════════════════════════════════════════════════════════
-VI_MARKERS = re.compile(
-    r"[àáảãạăắặẵẳặâấầẫẩậèéẻẽẹêếềễểệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđ"
-    r"ÀÁẢÃẠĂẮẶẴẲẶÂẤẦẪẨẬÈÉẺẼẸÊẾỀỄỂỆÌÍỈĨỊÒÓỎÕỌÔỐỒỔỖỘƠỚỜỞỠỢÙÚỦŨỤƯỨỪỬỮỰỲÝỶỸỴĐ]"
-)
-VI_WORDS = re.compile(
-    r"\b(là|gì|cách|hướng|dẫn|tốt|nhất|giá|nên|mua|và|của|cho|với|"
-    r"bạn|tôi|khi|hoặc|những|các|một|được|có|không|theo|từ|về|"
-    r"trong|ngoài|trên|dưới|sau|trước|đến|đi|làm|tìm|xem|học|biết)\b",
-    re.IGNORECASE,
-)
-
-def detect_language(kw: str) -> str:
-    k = kw.lower()
-    score = 3 if VI_MARKERS.search(k) else 0
-    score += len(VI_WORDS.findall(k))
-    return "vi" if score >= 2 else "en"
 
 def detect_intent_from_modifier(kw: str) -> dict:
     scores: dict[str,int] = {}
@@ -726,7 +710,6 @@ QUY TẮC QUAN TRỌNG:
 
 3. FAQ: KHÔNG tạo FAQ. Để faq=[] rỗng.
 
-
 4. SỐ H2: generate đúng target_h2_count (±1).
 
 5. NGÔN NGỮ: output = ngôn ngữ của keyword.
@@ -793,7 +776,7 @@ def build_prompt(keyword, lang, mod_intent, serp_intent, serp_results,
     wc_block = ""
     if wc_stats:
         wc_block = (f"Word count: competitor median={wc_stats['median']:,}, "
-                    f"target=~{wc_stats['target']:,} words\n")
+                    f"target=~{wc_stats['target']:,} từ\n")
 
     h2_block = ""
     if h2_stats:
@@ -806,19 +789,19 @@ def build_prompt(keyword, lang, mod_intent, serp_intent, serp_results,
     return f"""Keyword: "{keyword}"
 Language: {lang}
 
-SEARCH INTENT (2-layer):
+SEARCH INTENT (2 lớp):
 - Modifier: {mod_str}
-- SERP titles: {serp_str}
+- Tiêu đề SERP: {serp_str}
 
-SERP TITLES:
+TIÊU ĐỀ GOOGLE TOP {len(serp_results)}:
 {titles_block}
 
 {wc_block}{h2_block}
-COMPETITOR HEADINGS (deduplicated, {total_crawled} pages crawled):
+HEADING ĐỐI THỦ (đã gộp trùng, {total_crawled} trang crawl được):
 {headings_block}
 {h3_context}
-Instructions:
-1. intent → search_intent_confirmed
+Hướng dẫn:
+1. Xác nhận search intent → search_intent_confirmed
 2. [5+/{total_crawled}] H2 headings: COPY NGUYÊN TEXT, source="competitor"
 3. [3-4/{total_crawled}] H2: paraphrase nhẹ, source="competitor"
 4. [1-2/{total_crawled}] H2: rewrite hoặc AI gap, source="hybrid"/"ai"
@@ -826,10 +809,10 @@ Instructions:
 6. Nếu không có H3 từ competitor → dùng bullets (3-6 từ/bullet, 3-5 bullets)
 7. faq = [] (bỏ trống hoàn toàn)
 8. Generate EXACTLY {h2_stats.get('target','6-8') if h2_stats else '6-8'} H2 sections (±1)
-9. All text in Vietnamese
+9. Toàn bộ text bằng Tiếng Việt
 10. note = CHỈ ghi tần suất dạng "[X/{total_crawled} competitors]", ví dụ "[4/5 competitors]". KHÔNG ghi source= hay bất kỳ thứ gì khác vào note.
 
-Return pure JSON only."""
+Trả về JSON thuần túy, không markdown fence."""
 
 # ═══════════════════════════════════════════════════════════════════
 # RENDER (read-only view)
@@ -841,7 +824,6 @@ def render_outline_view(data: dict, wc_stats: dict):
     intent = data.get("search_intent_confirmed","")
     angles = data.get("unique_angles",[])
     outline= data.get("outline",[])
-    faq    = data.get("faq",[])
 
     st.markdown(f"""
     <div class="h1-card">
@@ -853,7 +835,7 @@ def render_outline_view(data: dict, wc_stats: dict):
     comp_n = sum(1 for b in outline if b.get("source")=="competitor")
     ai_n   = sum(1 for b in outline if b.get("source") in ("ai","hybrid"))
     il,ibg,icolor = INTENT_LABELS.get(atype,INTENT_LABELS["mixed"])
-    wc_pill = (f'<span class="pill words">📝 ~<b>{wc_stats["target"]:,}</b> words</span>'
+    wc_pill = (f'<span class="pill words">📝 ~<b>{wc_stats["target"]:,}</b> từ</span>'
                if wc_stats else "")
     st.markdown(f"""
     <div class="pills">
@@ -864,6 +846,8 @@ def render_outline_view(data: dict, wc_stats: dict):
       <span class="pill">🟢 <b>{ai_n}</b> AI mới</span>
     </div>""", unsafe_allow_html=True)
 
+    if not intent:
+        intent = INTENT_LABELS.get(atype, INTENT_LABELS["mixed"])[0]
     if intent:
         st.markdown(f'<div class="intent-banner">🎯 <b>Search intent:</b> {intent}</div>',
                     unsafe_allow_html=True)
@@ -937,7 +921,7 @@ def render_outline_view(data: dict, wc_stats: dict):
             for h in h3s:   lines.append(f"  H3: {h}")
             for b in bullets: lines.append(f"  • {b}")
             st.download_button("📋", data="\n".join(lines),
-                               file_name=f"h2_{idx+1}.txt",
+                               file_name=f"h2_{idx+1}_{_safe_filename(block["h2"], 20)}.txt",
                                mime="text/plain", key=f"dl_h2_{idx}", help="Tải về section này")
 
 # ═══════════════════════════════════════════════════════════════════
@@ -1030,14 +1014,25 @@ def outline_to_text(keyword: str, data: dict, wc_stats: dict) -> str:
     if data.get("meta_description"): lines.append(f"Meta: {data['meta_description']}")
     if data.get("search_intent_confirmed"): lines.append(f"Intent: {data['search_intent_confirmed']}")
     if wc_stats:
-        lines.append(f"Target: ~{wc_stats['target']:,} words (median {wc_stats['median']:,})")
-    lines.append("")
-    for i,b in enumerate(data.get("outline",[]),1):
-        lines.append(f"{b['h2']}")
+        lines.append(f"Target: ~{wc_stats['target']:,} từ (trung vị {wc_stats['median']:,})")
+    if data.get("unique_angles"):
+        lines.append("Góc nhìn độc đáo:")
+        for a in data["unique_angles"]:
+            lines.append(f"  ✦ {a}")
+        lines.append("")
+    for b in data.get("outline",[]):
+        lines.append(f"H2: {b['h2']}")
         for h in b.get("h3s",[]):      lines.append(f"   H3: {h}")
         for pt in b.get("bullets",[]): lines.append(f"   • {pt}")
         lines.append("")
     return "\n".join(lines)
+
+def _safe_filename(keyword: str, max_len: int = 40) -> str:
+    import re as _re
+    name = keyword.strip()[:max_len]
+    name = _re.sub(r'[\\/:*?"<>|]', '', name)
+    name = name.replace(' ', '_')
+    return name or 'outline'
 
 def run_ai_and_validate(system, prompt, key, stream_slot):
     raw = ""
@@ -1423,7 +1418,7 @@ if st.session_state.outline and not st.session_state.running:
     c1, c2, c3, c4 = st.columns([2, 2, 2, 2])
     with c1:
         st.download_button("⬇️ Tải xuống .txt", data=txt,
-                           file_name=f"outline_{kw[:40].replace(' ','_')}.txt",
+                           file_name=f"outline_{_safe_filename(kw)}.txt",
                            mime="text/plain", use_container_width=True)
     with c2:
         with st.expander("📋 H1 + H2"):
