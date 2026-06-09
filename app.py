@@ -679,7 +679,7 @@ def _merge_duplicate_h2s(outline: list[dict]) -> list[dict]:
         matched = 0
         for ha in h3s_a:
             for hb in h3s_b:
-                if SequenceMatcher(None, ha, hb).ratio() >= 0.55:
+                if SequenceMatcher(None, ha, hb).ratio() >= 0.65:
                     matched += 1
                     break
         return matched / min(len(h3s_a), len(h3s_b))
@@ -699,7 +699,7 @@ def _merge_duplicate_h2s(outline: list[dict]) -> list[dict]:
                 current["h2"].lower(), other["h2"].lower()).ratio()
             h3_over = h3_overlap_ratio(current, other)
 
-            if h2_sim >= 0.55 or h3_over >= 0.5:
+            if h2_sim >= 0.65 or h3_over >= 0.65:
                 # Gộp: giữ H2 có freq cao hơn (parse từ note)
                 def _freq(note: str) -> int:
                     import re as _re
@@ -811,6 +811,8 @@ QUY TẮC:
 2. KIỂM TRA H2 TRÙNG Ý: Trước khi thêm H2, kiểm tra xem topic đó đã có H2 nào cover chưa.
    Ví dụ: "Affiliate Marketing bao gồm các bên nào?" TRÙNG với H3 "Các bên liên quan..." của H2 trước
    -> Chỉ giữ 1 trong 2, không giữ cả H2 lẫn H3 cùng topic
+   TÁCH H2 khi cần: Nếu 1 H2 có H3 bao gồm nhiều chủ đề lớn khác nhau (ví dụ: định nghĩa + các bên + hình thức)
+   -> Tách thành 3 H2 riêng: "Affiliate là gì?", "Các bên trong Affiliate", "Hình thức Affiliate"
 3. H3:
    - CHỈ điền h3s nếu đối thủ thực sự có H3 dưới H2 đó
    - Không có H3 từ đối thủ -> dùng bullets (3-5 gợi ý ngắn)
@@ -887,9 +889,13 @@ def build_prompt(keyword: str, lang: str, mod_intent: dict,
                     f"mục tiêu=~{wc_stats['target']:,} từ\n")
 
     h2_block = ""
+    h2_target = 0
     if h2_stats:
+        h2_target = h2_stats['avg']
         h2_block = (f"H2 đối thủ: avg={h2_stats['avg']}, "
-                    f"median={h2_stats['median']}, range={h2_stats['min']}-{h2_stats['max']}\n")
+                    f"median={h2_stats['median']}, range={h2_stats['min']}-{h2_stats['max']}\n"
+                    f"TARGET: Tạo ĐÚNG {h2_target} H2 sections (+-1). "
+                    f"Không gộp H2 khác chủ đề chỉ để giảm số lượng.\n")
 
     return f"""Từ khoá: "{keyword}"
 Ngôn ngữ: Tiếng Việt
@@ -912,6 +918,7 @@ Hướng dẫn:
 4. H3: CHỈ điền nếu đối thủ có (xem H3 THỰC TẾ bên trên)
 5. Nếu không có H3 -> dùng bullets (3-5 gợi ý)
 6. note: ghi số thật "[X/{total_crawled} đối thủ]"
+7. Tạo ĐÚNG {h2_target if h2_target else "đủ"} H2 (+-1) — nếu H2 đầu có quá nhiều H3 khác chủ đề thì TÁCH thành nhiều H2 riêng
 
 Trả về JSON thuần túy, không markdown fence."""
 
