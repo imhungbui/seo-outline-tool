@@ -1395,16 +1395,16 @@ if st.session_state.outline and not st.session_state.running:
         lines = []
         if data.get("h1"):
             lines.append(f"H1: {data['h1']}")
-        for i, b in enumerate(data.get("outline", []), 1):
-            lines.append(b['h2'])
+        for b in data.get("outline", []):
+            lines.append(f"H2: {b['h2']}")
         return "\n".join(lines)
 
     def _copy_h1_h2_h3(data: dict) -> str:
         lines = []
         if data.get("h1"):
             lines.append(f"H1: {data['h1']}")
-        for i, b in enumerate(data.get("outline", []), 1):
-            lines.append(b['h2'])
+        for b in data.get("outline", []):
+            lines.append(f"H2: {b['h2']}")
             for h in b.get("h3s", []):
                 lines.append(f"   H3: {h}")
             for pt in b.get("bullets", []):
