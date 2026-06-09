@@ -690,128 +690,137 @@ def parse_json_response(raw: str) -> dict:
 # PROMPTS  — Feature #3: H2 count constraint
 # ═══════════════════════════════════════════════════════════════════
 
-SYSTEM_PROMPT = """Bạn là chuyên gia SEO content strategist. Tạo outline bài viết SEO tốt nhất.
+# ═══════════════════════════════════════════════════════════════════
+# 2-CALL AI WORKFLOW
+#
+# Call 1 — Tổng hợp semantic:
+#   Raw headings tất cả đối thủ → AI gộp ý trùng nghĩa,
+#   phân cấp ý lớn/nhỏ → topic_clusters
+#
+# Call 2 — Gen outline:
+#   topic_clusters + intent + stats → outline hoàn chỉnh
+# ═══════════════════════════════════════════════════════════════════
 
-QUY TẮC QUAN TRỌNG:
+def build_raw_headings_block(crawl_results: list[dict]) -> str:
+    """Gom toàn bộ H2/H3 từ tất cả trang đối thủ, theo từng trang."""
+    lines = []
+    for i, r in enumerate(crawl_results):
+        hs = r.get("headings") or []
+        if not hs:
+            continue
+        domain = domain_of(r["url"])
+        lines.append(f"\n### Trang {i+1}: {domain}")
+        for h in hs:
+            if h["tag"] in ("h2", "h3"):
+                indent = "  " if h["tag"] == "h2" else "    "
+                lines.append(f"{indent}[{h['tag'].upper()}] {h['text']}")
+    return "\n".join(lines)
 
-1. H2 TEXT:
-   - Heading [5+/N competitors]: GIỮ NGUYÊN text từ đối thủ (không rewrite, không paraphrase).
-     Lý do: nếu nhiều trang top rank cùng dùng 1 heading → đó là heading tốt nhất cho SEO.
-   - Heading [3-4/N]: có thể paraphrase nhẹ
-   - Heading [1-2/N] hoặc AI-generated: viết mới hoàn toàn
-   - source="competitor" khi lấy từ đối thủ, source="ai" khi tự tạo, source="hybrid" khi kết hợp
+# ── Call 1: Tổng hợp semantic ──────────────────────────────────────
+CLUSTER_SYSTEM = """Bạn là chuyên gia phân tích nội dung SEO.
+Nhiệm vụ: phân tích heading H2/H3 từ các trang đối thủ, tổng hợp thành danh sách topic unique.
 
-2. H3:
-   - CHỈ đưa vào h3s[] nếu đối thủ thực sự có H3 dưới H2 đó trong data crawl
-   - Nếu đối thủ KHÔNG có H3 → để h3s=[] và dùng "bullets" để gợi ý nội dung viết gì
-   - H3 phải có TỐI THIỂU 2 items — nếu chỉ có 1 H3 thì để vào bullets thay vì h3s
-   - bullets là gợi ý ngắn (3-6 từ) về điểm cần cover trong section đó
-   - Không được bịa H3 khi đối thủ không có
+QUY TẮC:
+1. Gộp các heading CÙng ý nghĩa thành 1 topic (dù diễn đạt khác nhau)
+   Ví dụ: "Affiliate Marketing là gì?", "Affiliate là gì? AM là gì?", "Định nghĩa Affiliate" → 1 topic
+2. Xác định CẤP BẬC: ý bao quát → H2, ý chi tiết nằm trong ý lớn → H3
+3. Giữ text tiếng Việt, dùng phiên bản phổ biến/rõ ràng nhất
+4. Loại bỏ hoàn toàn: menu, nav, CTA, quảng cáo, footer
+5. Tối đa 12 topic H2, mỗi H2 tối đa 6 H3
 
-3. FAQ: KHÔNG tạo FAQ. Để faq=[] rỗng.
+Trả về JSON thuần túy:
+{
+  "topics": [
+    {
+      "h2": "Tên topic H2",
+      "h3s": ["Sub-topic 1", "Sub-topic 2"],
+      "freq": số trang đối thủ đề cập topic này (ước tính),
+      "source_examples": ["ví dụ heading gốc 1", "ví dụ 2"]
+    }
+  ]
+}"""
 
-4. SỐ H2: generate đúng target_h2_count (±1).
+def build_cluster_prompt(keyword: str, crawl_results: list[dict],
+                         serp_results: list[dict]) -> str:
+    raw_block = build_raw_headings_block(crawl_results)
+    total = sum(1 for r in crawl_results if r.get("headings"))
+    titles = "\n".join(f"  #{r['rank']} {r['title']}"
+                        for r in serp_results if r.get("title"))
+    return f"""Từ khoá: "{keyword}"
+Số trang crawl thành công: {total}
 
-5. NGÔN NGỮ: output = ngôn ngữ của keyword.
+TIÊU ĐỀ TOP {len(serp_results)} KẾT QUẢ GOOGLE:
+{titles}
 
-JSON schema (tất cả field bắt buộc):
-{{
+HEADING CỦA {total} TRANG ĐỐI THỦ:
+{raw_block}
+
+Hãy tổng hợp thành danh sách topic unique, phân cấp H2/H3.
+Trả về JSON thuần túy, không markdown fence."""
+
+# ── Call 2: Gen outline từ topic clusters ─────────────────────────
+OUTLINE_SYSTEM = """Bạn là chuyên gia SEO content strategist.
+Nhiệm vụ: tạo outline bài viết SEO hoàn chỉnh từ topic clusters đã tổng hợp.
+
+QUY TẮC:
+1. Dùng topic clusters làm xương sống — đây là insight thực từ đối thủ
+2. source="competitor" nếu topic có freq cao (đối thủ đề cập nhiều)
+   source="hybrid" nếu topic có freq thấp nhưng relevant
+   source="ai" nếu là topic mới AI bổ sung (gap đối thủ bỏ sót)
+3. H3: CHỈ giữ nếu có ≥ 2 sub-topics thực sự. Nếu < 2 → dùng bullets gợi ý
+4. Số H2 ĐÚNG với target (±1)
+5. FAQ: KHÔNG tạo. faq=[]
+6. note: CHỈ ghi "[X đối thủ đề cập]". KHÔNG ghi source=
+7. Toàn bộ text tiếng Việt
+
+JSON schema:
+{
   "h1": "string",
-  "meta_description": "string 150-160 chars",
+  "meta_description": "string 150-160 ký tự",
   "article_type": "informational|listicle|how-to|comparison|review|commercial|transactional",
-  "search_intent_confirmed": "string",
-  "unique_angles": ["string"],
+  "search_intent_confirmed": "string 1 câu",
+  "unique_angles": ["gap mà đối thủ chưa cover"],
   "outline": [
-    {{
-      "h2": "string — giữ nguyên nếu [5+/N], paraphrase nếu [3-4/N], viết mới nếu AI",
+    {
+      "h2": "string",
       "source": "competitor|ai|hybrid",
-      "h3s": ["string — CHỈ có nếu đối thủ crawl được có H3 thực sự"],
-      "bullets": ["gợi ý nội dung ngắn nếu không có H3"],
-      "note": "[X/N competitors] — CHỈ ghi tần suất, không ghi source"
-    }}
+      "h3s": ["string — chỉ nếu có ≥2 sub-topics thực sự"],
+      "bullets": ["gợi ý ngắn nếu không đủ H3"],
+      "note": "[X đối thủ đề cập]"
+    }
   ],
   "faq": []
-}}"""
+}"""
 
-def build_prompt(keyword, lang, mod_intent, serp_intent, serp_results,
-                 deduped, crawl_results, wc_stats, h2_stats) -> str:
+def build_outline_prompt(keyword: str, topic_clusters: dict,
+                         serp_intent: dict, mod_intent: dict,
+                         wc_stats: dict, h2_stats: dict,
+                         serp_results: list[dict]) -> str:
+    import json as _json
 
-    mod_str  = (f"{mod_intent['intent']} ({mod_intent['confidence']}, "
-                f"signals: {', '.join(mod_intent['signals'][:4]) or 'none'})")
-    serp_str = (f"{serp_intent.get('intent','?')} (from SERP titles)"
-                if serp_intent else "unclear")
+    intent_str = (f"{mod_intent['intent']} (modifier), "
+                  f"{serp_intent.get('intent','?')} (SERP titles)")
 
-    titles_block = "\n".join(
-        f"  #{r['rank']} {r['title']}" for r in serp_results if r.get("title")
-    )
-
-    total_crawled = sum(1 for r in crawl_results if r.get("headings"))
-    headings_block = format_headings_for_prompt(deduped, total_crawled)
-
-    # Build H3 context: which H2s actually have H3s from competitors
-    h2_h3_map: dict[str, list[str]] = {}
-    for r in crawl_results:
-        hs = r.get("headings") or []
-        cur_h2 = None
-        for h in hs:
-            if h["tag"] == "h2":
-                cur_h2 = h["text"]
-                if cur_h2 not in h2_h3_map:
-                    h2_h3_map[cur_h2] = []
-            elif h["tag"] == "h3" and cur_h2:
-                if h["text"] not in h2_h3_map[cur_h2]:
-                    h2_h3_map[cur_h2].append(h["text"])
-
-    h3_context = ""
-    if h2_h3_map:
-        h3_lines = []
-        for h2_text, h3_list in list(h2_h3_map.items())[:20]:  # cap at 20 H2s
-            if h3_list:
-                h3_lines.append(f"  H2: {h2_text}")
-                for h3 in h3_list[:6]:  # cap H3s per H2
-                    h3_lines.append(f"    → H3: {h3}")
-        if h3_lines:
-            h3_context = "\nH3 THỰC TẾ TỪ COMPETITORS (chỉ những H2 có H3):\n" + "\n".join(h3_lines) + "\n"
-
-    wc_block = ""
+    wc_line = ""
     if wc_stats:
-        wc_block = (f"Word count: competitor median={wc_stats['median']:,}, "
-                    f"target=~{wc_stats['target']:,} từ\n")
+        wc_line = f"Số từ mục tiêu: ~{wc_stats['target']:,} từ (trung vị đối thủ: {wc_stats['median']:,})\n"
 
-    h2_block = ""
+    h2_line = ""
     if h2_stats:
-        h2_block = (
-            f"Competitor H2 count: avg={h2_stats['avg']}, "
-            f"median={h2_stats['median']}, range={h2_stats['min']}–{h2_stats['max']}\n"
-            f"TARGET H2 COUNT = {h2_stats['target']} (±1)\n"
-        )
+        h2_line = (f"Số H2 đối thủ: avg={h2_stats['avg']}, "
+                   f"median={h2_stats['median']}, range={h2_stats['min']}–{h2_stats['max']}\n"
+                   f"→ TARGET H2 = {h2_stats['target']} (±1)\n")
 
-    return f"""Keyword: "{keyword}"
-Language: {lang}
+    clusters_str = _json.dumps(topic_clusters, ensure_ascii=False, indent=2)
 
-SEARCH INTENT (2 lớp):
-- Modifier: {mod_str}
-- Tiêu đề SERP: {serp_str}
+    return f"""Từ khoá: "{keyword}"
+Search intent: {intent_str}
+{wc_line}{h2_line}
+TOPIC CLUSTERS (đã tổng hợp từ đối thủ):
+{clusters_str}
 
-TIÊU ĐỀ GOOGLE TOP {len(serp_results)}:
-{titles_block}
-
-{wc_block}{h2_block}
-HEADING ĐỐI THỦ (đã gộp trùng, {total_crawled} trang crawl được):
-{headings_block}
-{h3_context}
-Hướng dẫn:
-1. Xác nhận search intent → search_intent_confirmed
-2. [5+/{total_crawled}] H2 headings: COPY NGUYÊN TEXT, source="competitor"
-3. [3-4/{total_crawled}] H2: paraphrase nhẹ, source="competitor"
-4. [1-2/{total_crawled}] H2: rewrite hoặc AI gap, source="hybrid"/"ai"
-5. H3: CHỈ điền nếu competitor thực sự có H3 đó (xem H3 THỰC TẾ bên trên)
-6. Nếu không có H3 từ competitor → dùng bullets (3-6 từ/bullet, 3-5 bullets)
-7. faq = [] (bỏ trống hoàn toàn)
-8. Generate EXACTLY {h2_stats.get('target','6-8') if h2_stats else '6-8'} H2 sections (±1)
-9. Toàn bộ text bằng Tiếng Việt
-10. note = CHỈ ghi tần suất dạng "[X/{total_crawled} competitors]", ví dụ "[4/5 competitors]". KHÔNG ghi source= hay bất kỳ thứ gì khác vào note.
-
+Tạo outline SEO hoàn chỉnh dựa trên topic clusters trên.
+Bổ sung các AI gaps nếu có topic quan trọng mà đối thủ bỏ sót.
 Trả về JSON thuần túy, không markdown fence."""
 
 # ═══════════════════════════════════════════════════════════════════
@@ -1034,37 +1043,92 @@ def _safe_filename(keyword: str, max_len: int = 40) -> str:
     name = name.replace(' ', '_')
     return name or 'outline'
 
-def run_ai_and_validate(system, prompt, key, stream_slot):
-    raw = ""
+def call_ai_simple(system: str, prompt: str, key: str, max_tokens: int = 2048) -> str:
+    """Non-streaming call for Call 1 (cluster synthesis — faster, no UI feedback needed)."""
+    import httpx as _httpx
+    resp = _httpx.post(
+        "https://api.openai.com/v1/chat/completions",
+        headers={"Authorization": f"Bearer {key}", "content-type": "application/json"},
+        json={"model": "gpt-4.1-nano", "max_tokens": max_tokens,
+              "messages": [{"role": "system", "content": system},
+                           {"role": "user",   "content": prompt}]},
+        timeout=60,
+    )
+    if resp.status_code == 401: raise ValueError("❌ OpenAI: Invalid API key (401).")
+    if resp.status_code == 429: raise ValueError("❌ OpenAI: Rate limit (429).")
+    resp.raise_for_status()
+    return resp.json()["choices"][0]["message"]["content"]
+
+def run_two_call_pipeline(keyword: str, crawl_results: list, serp_results: list,
+                          serp_intent: dict, mod_intent: dict,
+                          wc_stats: dict, h2_stats: dict,
+                          key: str, stream_slot) -> tuple:
+    """
+    Call 1: Tổng hợp semantic → topic clusters
+    Call 2: Gen outline từ clusters (streamed)
+    Returns (outline_data, raw_call2)
+    """
+    # ── Call 1: Cluster synthesis ──────────────────────────────────
+    stream_slot.markdown(
+        '<div class="stream-box">🔍 Bước 1/2: Đang tổng hợp heading đối thủ...</div>',
+        unsafe_allow_html=True
+    )
     try:
-        def on_chunk(t):
-            prev = t[-500:].replace("<","&lt;").replace(">","&gt;")
-            stream_slot.markdown(f'<div class="stream-box">{prev}</div>',
-                                 unsafe_allow_html=True)
-        raw = call_claude_stream(system, prompt, key, on_chunk=on_chunk)
+        cluster_prompt = build_cluster_prompt(keyword, crawl_results, serp_results)
+        raw1 = call_ai_simple(CLUSTER_SYSTEM, cluster_prompt, key, max_tokens=2048)
+        topic_clusters = parse_json_response(raw1)
+        n_topics = len(topic_clusters.get("topics", []))
+        stream_slot.markdown(
+            f'<div class="stream-box">✅ Bước 1/2: Tổng hợp xong — {n_topics} topics unique\n\n'
+            f'🤖 Bước 2/2: Đang tạo outline...</div>',
+            unsafe_allow_html=True
+        )
+    except Exception as e:
+        stream_slot.empty()
+        st.error(f"Lỗi bước 1 (tổng hợp): {e}")
+        return None, ""
+
+    # ── Call 2: Gen outline (streamed) ─────────────────────────────
+    raw2 = ""
+    try:
+        outline_prompt = build_outline_prompt(
+            keyword, topic_clusters, serp_intent, mod_intent,
+            wc_stats, h2_stats, serp_results
+        )
+
+        def on_chunk(t: str):
+            prev = t[-600:].replace("<", "&lt;").replace(">", "&gt;")
+            stream_slot.markdown(
+                f'<div class="stream-box">✅ Bước 1 xong · 🤖 Bước 2/2 đang tạo...\n\n{prev}</div>',
+                unsafe_allow_html=True
+            )
+
+        raw2 = call_claude_stream(OUTLINE_SYSTEM, outline_prompt, key, on_chunk=on_chunk)
         stream_slot.empty()
     except ValueError as e:
-        stream_slot.empty(); st.error(str(e)); return None, raw
+        stream_slot.empty(); st.error(str(e)); return None, raw2
     except Exception as e:
-        stream_slot.empty(); st.error(f"Lỗi streaming: {e}"); return None, raw
+        stream_slot.empty(); st.error(f"Lỗi bước 2 (gen outline): {e}"); return None, raw2
 
+    # ── Validate ───────────────────────────────────────────────────
     try:
-        data = parse_json_response(raw)
+        data = parse_json_response(raw2)
     except json.JSONDecodeError as e:
         st.error(f"AI trả về JSON không hợp lệ: {e}")
-        with st.expander("Dữ liệu thô (debug)"): st.code(raw[:3000])
-        return None, raw
+        with st.expander("Dữ liệu thô (debug)"): st.code(raw2[:3000])
+        return None, raw2
 
     errors = validate_outline(data)
-    fatal  = [e for e in errors if "Missing" in e or "empty" in e]
+    fatal  = [e for e in errors if "Thiếu" in e or "rỗng" in e]
     warns  = [e for e in errors if e not in fatal]
     for w in warns: st.warning(f"⚠️ {w}")
     if fatal:
         st.markdown('<div class="val-err">❌ <b>Lỗi dữ liệu AI trả về:</b><br>'
-                    + "<br>".join(fatal)+"</div>", unsafe_allow_html=True)
-        with st.expander("Dữ liệu thô (debug)"): st.code(raw[:3000])
-        return None, raw
-    return fix_outline_data(data), raw
+                    + "<br>".join(fatal) + "</div>", unsafe_allow_html=True)
+        with st.expander("Dữ liệu thô (debug)"): st.code(raw2[:3000])
+        return None, raw2
+
+    return fix_outline_data(data), raw2
 
 # ═══════════════════════════════════════════════════════════════════
 # SESSION STATE
@@ -1309,15 +1373,22 @@ if st.session_state.running and not regen_btn:
                                 f'[{f_}/{tok}]</span> {h["text"]}',
                                 unsafe_allow_html=True)
 
-        # Step 3: AI
-        st.markdown("**🤖 Đang tạo outline...**")
+        # Step 3: AI — 2-call workflow
+        st.markdown("**🤖 Đang xử lý outline (2 bước)...**")
         ss = st.empty()
-        ss.markdown('<div class="stream-box">Connecting to OpenAI...</div>',
+        ss.markdown('<div class="stream-box">Đang khởi động...</div>',
                     unsafe_allow_html=True)
-        prompt = build_prompt(kw, eff_lang, intent_hint,
-                              st.session_state.serp_intent or {},
-                              serp, deduped, crawl, wc_stats, h2_stats)
-        od, _ = run_ai_and_validate(SYSTEM_PROMPT, prompt, anthropic_key, ss)
+        od, _ = run_two_call_pipeline(
+            keyword=kw,
+            crawl_results=crawl,
+            serp_results=serp,
+            serp_intent=st.session_state.serp_intent or {},
+            mod_intent=intent_hint,
+            wc_stats=wc_stats,
+            h2_stats=h2_stats,
+            key=anthropic_key,
+            stream_slot=ss,
+        )
         if od:
             st.session_state.outline = od
             st.success("✅ Outline đã sẵn sàng!")
@@ -1342,11 +1413,20 @@ elif regen_btn and not st.session_state.running:
         si      = st.session_state.serp_intent or {}
         serp_r  = st.session_state.serp or []
         crawl_r = st.session_state.crawl or []
-        st.markdown("**🔄 Đang tạo lại outline...**")
+        st.markdown("**🔄 Đang tạo lại outline (2 bước)...**")
         ss = st.empty()
-        ss.markdown('<div class="stream-box">Connecting...</div>', unsafe_allow_html=True)
-        prompt = build_prompt(kw, lang, hint, si, serp_r, deduped, crawl_r, wc, h2)
-        od, _ = run_ai_and_validate(SYSTEM_PROMPT, prompt, anthropic_key, ss)
+        ss.markdown('<div class="stream-box">Đang khởi động...</div>', unsafe_allow_html=True)
+        od, _ = run_two_call_pipeline(
+            keyword=kw,
+            crawl_results=crawl_r,
+            serp_results=serp_r,
+            serp_intent=si,
+            mod_intent=hint,
+            wc_stats=wc,
+            h2_stats=h2,
+            key=anthropic_key,
+            stream_slot=ss,
+        )
         if od:
             st.session_state.outline = od
             st.success("✅ Outline mới đã sẵn sàng!")
