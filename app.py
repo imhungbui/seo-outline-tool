@@ -135,7 +135,7 @@ BOILERPLATE_PATTERNS = re.compile(
     r"table of contents?|mục lục|contents?|navigation|"
     r"advertisement|sponsored|quảng cáo|"
     r"comments?|bình luận|phản hồi|"
-    r"search|tìm kiếm|menu|home|trang chủ|bài viết cùng chuyên mục|xem thêm|đọc thêm|chủ đề liên quan|không thể bỏ lỡ|có thể bạn quan tâm|bài viết nổi bật|tin tức mới nhất|tạo cv|topcv|vieclam|timviec|tư vấn du học|học bổng|du học|ngành học|tham khảo thêm|xem ngay|đăng ký ngay|liên hệ ngay)$",
+    r"search|tìm kiếm|menu|home|trang chủ|bài viết cùng chuyên mục|xem thêm|đọc thêm|chủ đề liên quan|không thể bỏ lỡ|có thể bạn quan tâm|bài viết nổi bật|tin tức mới nhất|tạo cv|topcv|vieclam|timviec|tư vấn du học|học bổng|ngành học|tham khảo thêm|xem ngay|đăng ký ngay|liên hệ ngay|gợi ý giúp bạn|gợi ý cho bạn|dành cho bạn|có thể bạn cần|việc làm liên quan|tuyển dụng|tìm việc|GMAT|IELTS|TOEIC|SAT|LSAT|ngành quản trị|ngành phẫu thuật|ngành y|học ngôn ngữ|liên hệ|hotline|email us|contact us)$",
     re.IGNORECASE,
 )
 
@@ -143,6 +143,18 @@ def _clean_heading_text(text: str) -> str:
     """Strip số thứ tự đầu heading: '1 Title', '2. Title', '1) Title' -> 'Title'"""
     text = re.sub(r"^\d+[\s\.\)\-]+", "", text).strip()
     return text
+
+# Patterns chỉ xuất hiện trong H3 unrelated (related posts ẩn dưới H2 hợp lệ)
+H3_UNRELATED_PATTERNS = re.compile(
+    r"(GMAT|IELTS|TOEIC|SAT|du lịch lữ hành|phẫu thuật thẩm mỹ|"
+    r"học ngôn ngữ anh|ngành y |tư vấn du học|"
+    r"gợi ý giúp bạn|gợi ý cho bạn|dành cho bạn)",
+    re.IGNORECASE,
+)
+
+def _is_unrelated_h3(text: str) -> bool:
+    """True nếu H3 là related posts / off-topic content."""
+    return bool(H3_UNRELATED_PATTERNS.search(text))
 
 CRAWL_HEADERS = {
     "User-Agent": (
@@ -414,6 +426,8 @@ def extract_headings_from_html(html: str) -> tuple[list[dict], int]:
         text = _clean_heading_text(text)
         if not text or len(text) < 3:
             continue
+        if _is_unrelated_h3(text):
+            continue
         headings.append({"tag": tag.name.lower(), "text": text})
     content_el = (
         soup.find("article") or soup.find("main") or
@@ -449,6 +463,8 @@ def extract_headings_from_markdown(md: str) -> tuple[list[dict], int]:
             continue
         text = _clean_heading_text(text)
         if not text or len(text) < 3:
+            continue
+        if _is_unrelated_h3(text):
             continue
         headings.append({"tag": f"h{level}", "text": text})
     body_lines = [l for l in md.splitlines() if not l.startswith("#")]
@@ -718,15 +734,17 @@ QUY TẮC:
    - (đối thủ: 5/N hoặc hơn): GIỮ NGUYÊN text từ đối thủ (không rewrite)
    - (đối thủ: 3-4/N): paraphrase nhẹ, source="competitor"
    - (đối thủ: 1-2/N) hoặc AI: viết mới, source="hybrid"/"ai"
-2. H3:
+2. KIỂM TRA H2 TRÙNG Ý: Trước khi thêm H2, kiểm tra xem topic đó đã có H2 nào cover chưa.
+   Ví dụ: "Affiliate Marketing bao gồm các bên nào?" TRÙNG với H3 "Các bên liên quan..." của H2 trước
+   -> Chỉ giữ 1 trong 2, không giữ cả H2 lẫn H3 cùng topic
+3. H3:
    - CHỈ điền h3s nếu đối thủ thực sự có H3 dưới H2 đó
    - Không có H3 từ đối thủ -> dùng bullets (3-5 gợi ý ngắn)
    - H3 phải có >= 2 items, nếu chỉ 1 -> chuyển sang bullets
-   - KHÔNG copy H3 có số thứ tự đầu (ví dụ "1 Title", "2. Title") - bỏ số đi
-3. KIỂM TRA TRÙNG: Nếu H3 của H2 này đã là H2 khác -> không lặp lại ý đó trong H3
+   - Bỏ H3 nếu không liên quan đến từ khoá chính (ví dụ: ngành học khác, GMAT, du lịch...)
 4. FAQ: KHÔNG tạo FAQ. faq=[] rỗng.
-4. note: ghi số thật "[X/N đối thủ]", KHÔNG ghi "[X/N]" hay source=
-5. Toàn bộ text tiếng Việt. Năm hiện tại là 2026.
+5. note: ghi số thật "[X/N đối thủ]", KHÔNG ghi "[X/N]" hay source=
+6. Toàn bộ text tiếng Việt. Năm hiện tại là 2026.
 
 JSON schema:
 {
